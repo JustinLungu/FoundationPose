@@ -136,7 +136,7 @@ class TripletH5Dataset(PairH5Dataset):
 
   def transform_depth_to_xyzmap(self, batch:BatchPoseData, H_ori, W_ori, bound=1):
     bs_full = batch.poseA.shape[0]
-    mini_batch_size = 84  # Process smaller mini-batches
+    mini_batch_size = 84  # smaller mini-batches: 84 * 3 = 252
     H, W = batch.rgbAs.shape[-2:]
     mesh_radius = batch.mesh_diameters.cuda() / 2
     tf_to_crops = batch.tf_to_crops.cuda()
@@ -144,7 +144,7 @@ class TripletH5Dataset(PairH5Dataset):
     batch.poseA = batch.poseA.cuda()
     batch.Ks = batch.Ks.cuda()
 
-    # Initialize empty lists for xyz_mapAs and xyz_mapBs
+    # empty lists for xyz_mapAs and xyz_mapBs
     xyz_mapAs_list = []
     xyz_mapBs_list = []
 
@@ -165,10 +165,9 @@ class TripletH5Dataset(PairH5Dataset):
             xyz_mapBs_chunk = kornia.geometry.transform.warp_perspective(xyz_mapBs_chunk, tf_to_crops[start:end], dsize=(H, W), mode='nearest', align_corners=False)
             xyz_mapBs_list.append(xyz_mapBs_chunk.cuda())
 
-        # Free unused GPU memory
         torch.cuda.empty_cache()
 
-    # Concatenate the results
+    # concatenate the results
     if batch.xyz_mapAs is None:
         batch.xyz_mapAs = torch.cat(xyz_mapAs_list, dim=0)
     if batch.xyz_mapBs is None:
@@ -177,7 +176,7 @@ class TripletH5Dataset(PairH5Dataset):
     batch.xyz_mapAs = batch.xyz_mapAs.cuda()
     batch.xyz_mapBs = batch.xyz_mapBs.cuda()
 
-    # Apply transformations
+    # apply transformations
     batch.xyz_mapAs = batch.xyz_mapAs - batch.poseA[:, :3, 3].reshape(bs_full, 3, 1, 1)
     batch.xyz_mapBs = batch.xyz_mapBs - batch.poseA[:, :3, 3].reshape(bs_full, 3, 1, 1)
 
