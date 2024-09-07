@@ -135,37 +135,64 @@ class TripletH5Dataset(PairH5Dataset):
 
 
   def transform_depth_to_xyzmap(self, batch:BatchPoseData, H_ori, W_ori, bound=1):
-    bs = len(batch.rgbAs)
-    H,W = batch.rgbAs.shape[-2:]
-    mesh_radius = batch.mesh_diameters.cuda()/2
+    bs_full = batch.poseA.shape[0]
+    mini_batch_size = 84  # Process smaller mini-batches
+    H, W = batch.rgbAs.shape[-2:]
+    mesh_radius = batch.mesh_diameters.cuda() / 2
     tf_to_crops = batch.tf_to_crops.cuda()
-    crop_to_oris = batch.tf_to_crops.inverse().cuda()  #(B,3,3)
+    crop_to_oris = batch.tf_to_crops.inverse().cuda()
     batch.poseA = batch.poseA.cuda()
     batch.Ks = batch.Ks.cuda()
 
-    if batch.xyz_mapAs is None:
-      depthAs_ori = kornia.geometry.transform.warp_perspective(batch.depthAs.cuda().expand(bs,-1,-1,-1), crop_to_oris, dsize=(H_ori, W_ori), mode='nearest', align_corners=False)
-      batch.xyz_mapAs = depth2xyzmap_batch(depthAs_ori[:,0], batch.Ks, zfar=np.inf).permute(0,3,1,2)  #(B,3,H,W)
-      batch.xyz_mapAs = kornia.geometry.transform.warp_perspective(batch.xyz_mapAs, tf_to_crops, dsize=(H,W), mode='nearest', align_corners=False)
-    batch.xyz_mapAs = batch.xyz_mapAs.cuda()
-    invalid = batch.xyz_mapAs[:,2:3]<0.1
-    batch.xyz_mapAs = (batch.xyz_mapAs-batch.poseA[:,:3,3].reshape(bs,3,1,1))
-    if self.cfg['normalize_xyz']:
-      batch.xyz_mapAs *= 1/mesh_radius.reshape(bs,1,1,1)
-      invalid = invalid.expand(bs,3,-1,-1) | (torch.abs(batch.xyz_mapAs)>=2)
-      batch.xyz_mapAs[invalid.expand(bs,3,-1,-1)] = 0
+    # Initialize empty lists for xyz_mapAs and xyz_mapBs
+    xyz_mapAs_list = []
+    xyz_mapBs_list = []
 
+    for start in range(0, bs_full, mini_batch_size):
+        end = min(start + mini_batch_size, bs_full)
+        bs = end - start
+
+        if batch.xyz_mapAs is None:
+            print(f"Processing batch from {start} to {end}")
+            depthAs_ori = kornia.geometry.transform.warp_perspective(batch.depthAs[start:end].cuda().expand(bs, -1, -1, -1), crop_to_oris[start:end], dsize=(H_ori, W_ori), mode='nearest', align_corners=False)
+            xyz_mapAs_chunk = depth2xyzmap_batch(depthAs_ori[:, 0], batch.Ks[start:end], zfar=np.inf).permute(0, 3, 1, 2)
+            xyz_mapAs_chunk = kornia.geometry.transform.warp_perspective(xyz_mapAs_chunk, tf_to_crops[start:end], dsize=(H, W), mode='nearest', align_corners=False)
+            xyz_mapAs_list.append(xyz_mapAs_chunk.cuda())
+
+        if batch.xyz_mapBs is None:
+            depthBs_ori = kornia.geometry.transform.warp_perspective(batch.depthBs[start:end].cuda().expand(bs, -1, -1, -1), crop_to_oris[start:end], dsize=(H_ori, W_ori), mode='nearest', align_corners=False)
+            xyz_mapBs_chunk = depth2xyzmap_batch(depthBs_ori[:, 0], batch.Ks[start:end], zfar=np.inf).permute(0, 3, 1, 2)
+            xyz_mapBs_chunk = kornia.geometry.transform.warp_perspective(xyz_mapBs_chunk, tf_to_crops[start:end], dsize=(H, W), mode='nearest', align_corners=False)
+            xyz_mapBs_list.append(xyz_mapBs_chunk.cuda())
+
+        # Free unused GPU memory
+        torch.cuda.empty_cache()
+
+    # Concatenate the results
+    if batch.xyz_mapAs is None:
+        batch.xyz_mapAs = torch.cat(xyz_mapAs_list, dim=0)
     if batch.xyz_mapBs is None:
-      depthBs_ori = kornia.geometry.transform.warp_perspective(batch.depthBs.cuda().expand(bs,-1,-1,-1), crop_to_oris, dsize=(H_ori, W_ori), mode='nearest', align_corners=False)
-      batch.xyz_mapBs = depth2xyzmap_batch(depthBs_ori[:,0], batch.Ks, zfar=np.inf).permute(0,3,1,2)  #(B,3,H,W)
-      batch.xyz_mapBs = kornia.geometry.transform.warp_perspective(batch.xyz_mapBs, tf_to_crops, dsize=(H,W), mode='nearest', align_corners=False)
+        batch.xyz_mapBs = torch.cat(xyz_mapBs_list, dim=0)
+
+    batch.xyz_mapAs = batch.xyz_mapAs.cuda()
     batch.xyz_mapBs = batch.xyz_mapBs.cuda()
-    invalid = batch.xyz_mapBs[:,2:3]<0.1
-    batch.xyz_mapBs = (batch.xyz_mapBs-batch.poseA[:,:3,3].reshape(bs,3,1,1))
+
+    # Apply transformations
+    batch.xyz_mapAs = batch.xyz_mapAs - batch.poseA[:, :3, 3].reshape(bs_full, 3, 1, 1)
+    batch.xyz_mapBs = batch.xyz_mapBs - batch.poseA[:, :3, 3].reshape(bs_full, 3, 1, 1)
+
     if self.cfg['normalize_xyz']:
-      batch.xyz_mapBs *= 1/mesh_radius.reshape(bs,1,1,1)
-      invalid = invalid.expand(bs,3,-1,-1) | (torch.abs(batch.xyz_mapBs)>=2)
-      batch.xyz_mapBs[invalid.expand(bs,3,-1,-1)] = 0
+        invalid_as = batch.xyz_mapAs[:, 2:3] < 0.001
+        invalid_bs = batch.xyz_mapBs[:, 2:3] < 0.001
+
+        batch.xyz_mapAs *= 1 / mesh_radius.reshape(bs_full, 1, 1, 1)
+        batch.xyz_mapBs *= 1 / mesh_radius.reshape(bs_full, 1, 1, 1)
+
+        invalid_as = invalid_as.expand(bs_full, 3, -1, -1) | (torch.abs(batch.xyz_mapAs) >= 2)
+        invalid_bs = invalid_bs.expand(bs_full, 3, -1, -1) | (torch.abs(batch.xyz_mapBs) >= 2)
+
+        batch.xyz_mapAs[invalid_as] = 0
+        batch.xyz_mapBs[invalid_bs] = 0
 
     return batch
 
