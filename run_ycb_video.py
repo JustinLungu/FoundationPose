@@ -41,6 +41,7 @@ def get_mask(reader, i_frame, ob_id, detect_type):
 
 
 def run_pose_estimation_worker(reader, i_frames, est:FoundationPose, debug=False, ob_id=None, device:int=0):
+  
   result = NestDict()
   torch.cuda.set_device(device)
   est.to_device(f'cuda:{device}')
@@ -103,6 +104,7 @@ def run_pose_estimation():
     symmetry_tfs = reader_tmp.symmetry_tfs[ob_id]
 
     args = []
+
     for video_dir in video_dirs:
       reader = YcbVideoReader(video_dir, zfar=1.5)
       scene_ob_ids = reader.get_instance_ids_in_image(0)

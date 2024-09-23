@@ -49,12 +49,13 @@ def get_mask(reader, i_frame, ob_id, detect_type):
 
 
 def run_pose_estimation_worker(reader, i_frames, est:FoundationPose=None, debug=0, ob_id=None, device='cuda:0'):
+  
+  result = NestDict()
   torch.cuda.set_device(device)
   est.to_device(device)
   est.glctx = dr.RasterizeCudaContext(device=device)
-
-  result = NestDict()
-
+  debug_dir = est.debug_dir
+  
   for i, i_frame in enumerate(i_frames):
     logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
     video_id = reader.get_video_id()
@@ -63,7 +64,7 @@ def run_pose_estimation_worker(reader, i_frames, est:FoundationPose=None, debug=
     id_str = reader.id_strs[i_frame]
     H,W = color.shape[:2]
 
-    debug_dir =est.debug_dir
+    
 
     ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
     if ob_mask is None:
