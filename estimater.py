@@ -135,25 +135,44 @@ class FoundationPose:
 
 
   def guess_translation(self, depth, mask, K):
-    vs,us = np.where(mask>0)
-    if len(us)==0:
-      logging.info(f'mask is all zero')
-      return np.zeros((3))
-    uc = (us.min()+us.max())/2.0
-    vc = (vs.min()+vs.max())/2.0
-    valid = mask.astype(bool) & (depth>=0.001)
+    # Get the valid pixel coordinates where the mask is greater than 0
+    vs, us = np.where(mask > 0)
+    
+    if len(us) == 0:
+        logging.info(f'mask is all zero')
+        return np.zeros((3))
+    
+    # Compute the center of the mask
+    uc = (us.min() + us.max()) / 2.0
+    vc = (vs.min() + vs.max()) / 2.0
+    
+    # Validate if depth and mask contain valid information
+    valid = mask.astype(bool) & (depth >= 0.001)
     if not valid.any():
-      logging.info(f"valid is empty")
-      return np.zeros((3))
+        logging.info(f"valid is empty")
+        return np.zeros((3))
 
+    # Compute the median depth value in the valid mask
     zc = np.median(depth[valid])
-    center = (np.linalg.inv(K)@np.asarray([uc,vc,1]).reshape(3,1))*zc
+    
+    # Print the current values for debugging purposes
+    print(f"[DEBUG] uc: {uc}, vc: {vc}, zc: {zc}")
+    print(f"[DEBUG] K matrix: {K}, shape: {K.shape}")
+    
+    # Ensure K is a valid 3x3 matrix
+    if K.ndim != 2 or K.shape != (3, 3):
+        raise ValueError(f"Invalid K matrix. Expected 2D (3x3), got {K.shape}")
+    
+    # Compute the center
+    center = (np.linalg.inv(K) @ np.asarray([uc, vc, 1]).reshape(3, 1)) * zc
 
-    if self.debug>=2:
-      pcd = toOpen3dCloud(center.reshape(1,3))
-      o3d.io.write_point_cloud(f'{self.debug_dir}/init_center.ply', pcd)
-
+    # Optionally save the point cloud for debugging
+    if self.debug >= 2:
+        pcd = toOpen3dCloud(center.reshape(1, 3))
+        o3d.io.write_point_cloud(f'{self.debug_dir}/init_center.ply', pcd)
+    
     return center.reshape(3)
+
 
 
   def register(self, K, rgb, depth, ob_mask, ob_id=None, glctx=None, iteration=5):

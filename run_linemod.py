@@ -48,44 +48,52 @@ def get_mask(reader, i_frame, ob_id, detect_type):
 
 
 
-def run_pose_estimation_worker(reader, i_frames, est:FoundationPose=None, debug=0, ob_id=None, device='cuda:0'):
-  
+def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, debug=0, ob_id=None, device='cuda:0'):
   result = NestDict()
   torch.cuda.set_device(device)
   est.to_device(device)
   est.glctx = dr.RasterizeCudaContext(device=device)
   debug_dir = est.debug_dir
-  
+
   for i, i_frame in enumerate(i_frames):
-    logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
-    video_id = reader.get_video_id()
-    color = reader.get_color(i_frame)
-    depth = reader.get_depth(i_frame)
-    id_str = reader.id_strs[i_frame]
-    H,W = color.shape[:2]
+      logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
+      video_id = reader.get_video_id()
+      color = reader.get_color(i_frame)
+      depth = reader.get_depth(i_frame)
+      id_str = reader.id_strs[i_frame]
+      H, W = color.shape[:2]
 
-    
+      # Extract the K matrix for the current frame as a NumPy array
+      frame_key = str(i_frame).zfill(6)  # Ensure the frame number is zero-padded to match the dictionary keys
+      if frame_key not in reader.K:
+          logging.error(f"K matrix not found for frame {frame_key}. Skipping.")
+          result[video_id][id_str][ob_id] = np.eye(4)
+          continue
+      
+      K_matrix = np.array(reader.K[frame_key])  # Convert K to a NumPy array
 
-    ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
-    if ob_mask is None:
-      logging.info("ob_mask not found, skip")
-      result[video_id][id_str][ob_id] = np.eye(4)
-      return result
+      ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
+      if ob_mask is None:
+          logging.info("ob_mask not found, skip")
+          result[video_id][id_str][ob_id] = np.eye(4)
+          continue
 
-    est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
+      est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
 
-    pose = est.register(K=reader.K, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
-    logging.info(f"pose:\n{pose}")
+      # Pass the K matrix as a NumPy array to the register function
+      pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
+      logging.info(f"pose:\n{pose}")
 
-    if debug>=3:
-      m = est.mesh_ori.copy()
-      tmp = m.copy()
-      tmp.apply_transform(pose)
-      tmp.export(f'{debug_dir}/model_tf.obj')
+      if debug >= 3:
+          m = est.mesh_ori.copy()
+          tmp = m.copy()
+          tmp.apply_transform(pose)
+          tmp.export(f'{debug_dir}/model_tf.obj')
 
-    result[video_id][id_str][ob_id] = pose
+      result[video_id][id_str][ob_id] = pose
 
   return result
+
 
 
 def run_pose_estimation():
