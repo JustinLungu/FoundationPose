@@ -29,3 +29,10 @@ Step 5: Next Steps
 - Run the new script (run_hots.py) after these modifications.
 - Test if the data is flowing correctly into the register() function from HOTS.
 - Modify or improve the pose estimation logic for RGB-only data inside register().
+
+
+https://github.com/gtziafas/HOTS
+https://paperswithcode.com/dataset/linemod-1
+https://www.ycbbenchmarks.com/#:~:text=YCB%20Object%20and%20Model%20Set,some%20widely%20used%20manipulation%20tests.
+https://github.com/hz-ants/FFB6D?tab=readme-ov-file#datasets
+https://github.com/ethnhe/PVN3D/tree/master
