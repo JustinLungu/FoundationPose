@@ -180,6 +180,11 @@ class FoundationPose:
       o3d.io.write_point_cloud(f'{self.debug_dir}/scene_raw.ply',pcd)
       cv2.imwrite(f'{self.debug_dir}/ob_mask.png', (ob_mask*255.0).clip(0,255))
 
+    if ob_mask.ndim == 3:
+      print("[DEBUG] Converting ob_mask from RGB to grayscale")
+      ob_mask = ob_mask[:, :, 0]  # Assuming the mask is binary and any one channel (like red) will suffice
+
+
     normal_map = None
     valid = (depth>=0.001) & (ob_mask>0)
     if valid.sum()<4:

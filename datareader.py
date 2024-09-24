@@ -9,6 +9,7 @@
 
 from Utils import *
 import json,os,sys
+import yaml
 
 
 BOP_LIST = ['lmo','tless','ycbv','hb','tudl','icbin','itodd']
@@ -158,24 +159,28 @@ class BopBaseReader:
     self.resize = resize
     self.dataset_name = None
     self.color_files = sorted(glob.glob(f"{self.base_dir}/rgb/*"))
-    if len(self.color_files)==0:
-      self.color_files = sorted(glob.glob(f"{self.base_dir}/gray/*"))
+    if len(self.color_files) == 0:
+        self.color_files = sorted(glob.glob(f"{self.base_dir}/gray/*"))
     self.zfar = zfar
 
-    self.K_table = {}
-    with open(f'{self.base_dir}/scene_camera.json','r') as ff:
-      info = json.load(ff)
-    for k in info:
-      self.K_table[f'{int(k):06d}'] = np.array(info[k]['cam_K']).reshape(3,3)
-      self.bop_depth_scale = info[k]['depth_scale']
-
-    if os.path.exists(f'{self.base_dir}/scene_gt.json'):
-      with open(f'{self.base_dir}/scene_gt.json','r') as ff:
-        self.scene_gt = json.load(ff)
-      self.scene_gt = copy.deepcopy(self.scene_gt)   # Release file handle to be pickle-able by joblib
-      assert len(self.scene_gt)==len(self.color_files)
+    # Read camera intrinsics from info.yml
+    info_file = f'{self.base_dir}/info.yml'
+    if os.path.exists(info_file):
+        with open(info_file, 'r') as ff:
+            info = yaml.safe_load(ff)
+        self.K_table = {f'{i:06d}': np.array(info[i]['cam_K']).reshape(3, 3) for i in info}
+        #self.K_table = {f'{i:06d}': np.array(info['intrinsic_matrix']) for i in range(len(self.color_files))}
+        self.bop_depth_scale = info['depth_scale'] if 'depth_scale' in info else 1.0
     else:
-      self.scene_gt = None
+        raise FileNotFoundError(f"info.yml not found in {self.base_dir}")
+
+    # Read ground truth from gt.yml
+    gt_file = f'{self.base_dir}/gt.yml'
+    if os.path.exists(gt_file):
+        with open(gt_file, 'r') as ff:
+            self.scene_gt = yaml.safe_load(ff)
+    else:
+        self.scene_gt = None
 
     self.make_id_strs()
 
@@ -194,8 +199,8 @@ class BopBaseReader:
 
   def get_K(self, i_frame):
     K = self.K_table[self.id_strs[i_frame]]
-    if self.resize!=1:
-      K[:2,:2] *= self.resize
+    if self.resize != 1:
+        K[:2, :2] *= self.resize
     return K
 
 
@@ -203,11 +208,15 @@ class BopBaseReader:
     video_id = int(self.base_dir.rstrip('/').split('/')[-1])
     return video_id
 
+  '''
   def make_id_strs(self):
     self.id_strs = []
     for i in range(len(self.color_files)):
       name = os.path.basename(self.color_files[i]).split('.')[0]
       self.id_strs.append(name)
+  '''
+  def make_id_strs(self):
+    self.id_strs = [os.path.basename(f).split('.')[0] for f in self.color_files]
 
 
   def get_instance_ids_in_image(self, i_frame:int):
@@ -234,27 +243,22 @@ class BopBaseReader:
     raise RuntimeError("You should override this")
 
 
-  def get_color(self,i):
+  def get_color(self, i):
     color = imageio.imread(self.color_files[i])
-    if len(color.shape)==2:
-      color = np.tile(color[...,None], (1,1,3))  # Gray to RGB
-    if self.resize!=1:
-      color = cv2.resize(color, fx=self.resize, fy=self.resize, dsize=None)
+    if len(color.shape) == 2:
+        color = np.tile(color[..., None], (1, 1, 3))  # Convert grayscale to RGB
+    if self.resize != 1:
+        color = cv2.resize(color, dsize=None, fx=self.resize, fy=self.resize)
     return color
 
 
-  def get_depth(self,i, filled=False):
-    if filled:
-      depth_file = self.color_files[i].replace('rgb','depth_filled')
-      depth_file = f'{os.path.dirname(depth_file)}/0{os.path.basename(depth_file)}'
-      depth = cv2.imread(depth_file,-1)/1e3
-    else:
-      depth_file = self.color_files[i].replace('rgb','depth').replace('gray','depth')
-      depth = cv2.imread(depth_file,-1)*1e-3*self.bop_depth_scale
-    if self.resize!=1:
-      depth = cv2.resize(depth, fx=self.resize, fy=self.resize, dsize=None, interpolation=cv2.INTER_NEAREST)
-    depth[depth<0.001] = 0
-    depth[depth>self.zfar] = 0
+  def get_depth(self, i):
+    depth_file = self.color_files[i].replace('rgb', 'depth').replace('gray', 'depth')
+    depth = cv2.imread(depth_file, -1) * 1e-3 * self.bop_depth_scale
+    if self.resize != 1:
+        depth = cv2.resize(depth, dsize=None, fx=self.resize, fy=self.resize, interpolation=cv2.INTER_NEAREST)
+    depth[depth < 0.001] = 0
+    depth[depth > self.zfar] = 0
     return depth
 
   def get_xyz_map(self,i):
@@ -263,29 +267,52 @@ class BopBaseReader:
     return xyz_map
 
 
-  def get_mask(self, i_frame:int, ob_id:int, type='mask_visib'):
+  def get_mask(self, i_frame: int, ob_id: int, type='mask'):
     '''
-    @type: mask_visib (only visible part) / mask (projected mask from whole model)
+    @type: mask (projected mask from whole model)
     '''
     pos = 0
-    name = int(os.path.basename(self.color_files[i_frame]).split('.')[0])
-    if self.scene_gt is not None:
-      for k in self.scene_gt[str(name)]:
-        if k['obj_id']==ob_id:
-          break
+    # Get the frame number from the file name (convert to integer to match the scene_gt keys)
+    frame_name = int(os.path.basename(self.color_files[i_frame]).split('.')[0])
+
+    # Debugging: Show frame number and related info
+    #print(f"[DEBUG] Frame index: {i_frame}, Frame name (from color files): {frame_name}, Object ID: {ob_id}")
+    #print(f"[DEBUG] Available keys in scene_gt: {self.scene_gt.keys()}")
+
+    # Check if the current frame exists in scene_gt
+    if frame_name not in self.scene_gt:
+        logging.warning(f"Frame {frame_name} not found in scene_gt for object ID {ob_id}. Skipping frame.")
+        return None
+
+    # Proceed with mask fetching if the frame is available
+    print(f"Frame {frame_name} found in scene_gt")
+    for k in self.scene_gt[frame_name]:
+        #print(f"k = {k['obj_id']}")
+        if k['obj_id'] == ob_id:
+            break
         pos += 1
-      mask_file = f'{self.base_dir}/{type}/{name:06d}_{pos:06d}.png'
-      if not os.path.exists(mask_file):
+
+    # Zero-pad the frame number for file names
+    frame_name_padded = f'{frame_name:04d}'  # Now padded to 4 digits
+
+    # Modify the mask file path to match your naming convention
+    mask_file = f'{self.base_dir}/{type}/{frame_name_padded}.png'
+
+    if not os.path.exists(mask_file):
         logging.info(f'{mask_file} not found')
         return None
-    else:
-      # mask_dir = os.path.dirname(self.color_files[0]).replace('rgb',type)
-      # mask_file = f'{mask_dir}/{self.id_strs[i_frame]}_{ob_id:06d}.png'
-      raise RuntimeError
+
+    # Load the mask image
     mask = cv2.imread(mask_file, -1)
-    if self.resize!=1:
-      mask = cv2.resize(mask, fx=self.resize, fy=self.resize, dsize=None, interpolation=cv2.INTER_NEAREST)
-    return mask>0
+
+    # Resize mask if necessary
+    if self.resize != 1:
+        mask = cv2.resize(mask, fx=self.resize, fy=self.resize, dsize=None, interpolation=cv2.INTER_NEAREST)
+
+    return mask > 0
+
+
+
 
 
   def get_gt_mesh(self, ob_id:int):
@@ -351,23 +378,40 @@ class BopBaseReader:
 
   def load_symmetry_tfs(self):
     dir = os.path.dirname(self.get_gt_mesh_file(self.ob_ids[0]))
-    info_file = f'{dir}/models_info.json'
+    info_file = f'{dir}/models_info.yml'
+
+    # Load the YAML file instead of JSON
     with open(info_file,'r') as ff:
-      info = json.load(ff)
+        info = yaml.safe_load(ff)
+
+    # Print available keys for debugging
+    print("Available keys in models_info.yml:", list(info.keys()))
+
     self.symmetry_tfs = {}
     self.symmetry_info_table = {}
+
     for ob_id in self.ob_ids:
-      self.symmetry_info_table[ob_id] = info[str(ob_id)]
-      self.symmetry_tfs[ob_id] = symmetry_tfs_from_info(info[str(ob_id)], rot_angle_discrete=5)
+        # Print the current object ID for debugging
+        print(f"Current object ID: {ob_id}")
+
+        # Convert ob_id to an integer for comparison
+        if ob_id not in info:
+            print(f"Object ID {ob_id} not found in models_info.yml, skipping...")
+            continue
+
+        # Access the corresponding entry in the YAML file
+        self.symmetry_info_table[ob_id] = info[ob_id]  # Use integer key here
+        self.symmetry_tfs[ob_id] = symmetry_tfs_from_info(info[ob_id], rot_angle_discrete=5)
+    
     self.geometry_symmetry_info_table = copy.deepcopy(self.symmetry_info_table)
 
-
+  
   def get_video_id(self):
     return int(self.base_dir.split('/')[-1])
 
 
 class LinemodOcclusionReader(BopBaseReader):
-  def __init__(self,base_dir='/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/LINEMOD-O/lmo_test_all/test/000002', zfar=np.inf):
+  def __init__(self,base_dir='/Linemod_preprocessed/data/01', zfar=np.inf):
     super().__init__(base_dir, zfar=zfar)
     self.dataset_name = 'lmo'
     self.K = list(self.K_table.values())[0]
@@ -392,42 +436,83 @@ class LinemodOcclusionReader(BopBaseReader):
     self.load_symmetry_tfs()
 
   def get_gt_mesh_file(self, ob_id):
-    mesh_dir = f'{BOP_DIR}/{self.dataset_name}/models/obj_{ob_id:06d}.ply'
-    return mesh_dir
-
+    # Define where ground truth mesh models are stored for LINEMOD
+    return f'Linemod_preprocessed/models/obj_{ob_id:02d}.ply'
 
 
 class LinemodReader(LinemodOcclusionReader):
-  def __init__(self, base_dir='/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/LINEMOD/lm_test_all/test/000001', zfar=np.inf, split=None):
-    super().__init__(base_dir, zfar=zfar)
-    self.dataset_name = 'lm'
-    if split is not None:  # train/test
-      with open(f'/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/LINEMOD/Linemod_preprocessed/data/{self.get_video_id():02d}/{split}.txt','r') as ff:
-        lines = ff.read().splitlines()
-      self.color_files = []
-      for line in lines:
-        id = int(line)
-        self.color_files.append(f'{self.base_dir}/rgb/{id:06d}.png')
-      self.make_id_strs()
-
-    self.ob_ids = np.setdiff1d(np.arange(1,16), np.array([7,3])).tolist()  # Exclude bowl and mug
-    self.load_symmetry_tfs()
-
-
-  def get_gt_mesh_file(self, ob_id):
-    root = self.base_dir
-    while 1:
-      if os.path.exists(f'{root}/lm_models'):
-        mesh_dir = f'{root}/lm_models/models/obj_{ob_id:06d}.ply'
-        break
+  def __init__(self, base_dir='/Linemod_preprocessed/data/01', zfar=np.inf, split=None):
+      super().__init__(base_dir, zfar=zfar)
+      self.dataset_name = 'lm'
+      
+      # Load camera intrinsics from info.yml
+      info_file = f'{self.base_dir}/info.yml'
+      if os.path.exists(info_file):
+          with open(info_file, 'r') as file:
+              info_data = yaml.safe_load(file)
+          # Assuming camera intrinsics are stored under the key 'intrinsic_matrix'
+          self.K = {f'{i:06d}': np.array(info_data[i]['cam_K']).reshape(3, 3) for i in info_data}
       else:
-        root = os.path.abspath(f'{root}/../')
-    return mesh_dir
+          raise FileNotFoundError(f"Camera intrinsics file info.yml not found in {self.base_dir}")
 
+      # Load color files based on the split (train/test)
+      if split is not None:
+          split_file = f'/Linemod_preprocessed/data/{self.get_video_id():02d}/{split}.txt'
+          if os.path.exists(split_file):
+              with open(split_file, 'r') as ff:
+                  lines = ff.read().splitlines()
+              self.color_files = [f'{self.base_dir}/rgb/{int(id):06d}.png' for id in lines]
+              self.make_id_strs()
+          else:
+              raise FileNotFoundError(f"{split}.txt file not found in {self.base_dir}")
+
+      # Exclude certain object IDs (bowl and mug)
+      self.ob_ids = np.setdiff1d(np.arange(1, 16), np.array([7, 3])).tolist()
+      self.load_symmetry_tfs()
+
+  def get_gt_pose(self, i_frame: int, ob_id: int):
+    """
+    Fetches the ground truth pose for a given frame and object ID.
+    """
+    # Debugging: print frame and object id info
+    print(f"[DEBUG] Accessing ground truth pose for frame {i_frame}, object ID {ob_id}")
+    
+    # Ensure the frame index is kept as an integer
+    gt_data = self.scene_gt
+    frame_index = i_frame  # already an integer from earlier
+    
+    # Check if the frame exists in scene_gt
+    if frame_index not in gt_data:
+        logging.error(f"Frame {frame_index} not found in scene_gt")
+        return None
+    
+    # Now, loop through the objects in this frame and find the one with matching obj_id
+    for obj_data in gt_data[frame_index]:
+        if obj_data['obj_id'] == ob_id:
+            print(f"[DEBUG] Found matching object ID {ob_id} in frame {frame_index}")
+            return obj_data  # Return the ground truth pose for this object
+    
+    # If we didn't find a match
+    logging.error(f"Object ID {ob_id} not found in frame {frame_index}")
+    return None
+  
+
+  
+  def get_gt_mesh_file(self, ob_id):
+      # Locate the ground truth mesh for the object
+      root = self.base_dir
+      while True:
+          if os.path.exists(f'{root}/models'):
+              mesh_dir = f'{root}/models/obj_{ob_id:02d}.ply'
+              break
+          else:
+              root = os.path.abspath(f'{root}/../')
+      return mesh_dir
 
   def get_reconstructed_mesh(self, ob_id, ref_view_dir):
-    mesh = trimesh.load(os.path.abspath(f'{ref_view_dir}/ob_{ob_id:07d}/model/model.obj'))
-    return mesh
+      # Get the reconstructed mesh for the object
+      mesh = trimesh.load(os.path.abspath(f'{ref_view_dir}/ob_{ob_id:07d}/model/model.obj'))
+      return mesh
 
 
 class YcbVideoReader(BopBaseReader):

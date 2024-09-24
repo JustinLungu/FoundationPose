@@ -90,7 +90,7 @@ def run_pose_estimation_worker(reader, i_frames, est:FoundationPose=None, debug=
 
 def run_pose_estimation():
   wp.force_load(device='cuda')
-  reader_tmp = LinemodReader(f'{opt.linemod_dir}/lm_test_all/test/000002', split=None)
+  reader_tmp = LinemodReader(f'Linemod_preprocessed/data/01', split=None)
 
   debug = opt.debug
   use_reconstructed_mesh = opt.use_reconstructed_mesh
@@ -104,47 +104,54 @@ def run_pose_estimation():
   for ob_id in reader_tmp.ob_ids:
     ob_id = int(ob_id)
     if use_reconstructed_mesh:
-      mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
+        mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
     else:
-      mesh = reader_tmp.get_gt_mesh(ob_id)
+        mesh = reader_tmp.get_gt_mesh(ob_id)
     symmetry_tfs = reader_tmp.symmetry_tfs[ob_id]
 
     args = []
 
-    video_dir = f'{opt.linemod_dir}/lm_test_all/test/{ob_id:06d}'
+    video_dir = f'Linemod_preprocessed/data/{ob_id:02d}'
     reader = LinemodReader(video_dir, split=None)
     video_id = reader.get_video_id()
     est.reset_object(model_pts=mesh.vertices.copy(), model_normals=mesh.vertex_normals.copy(), symmetry_tfs=symmetry_tfs, mesh=mesh)
 
     for i in range(len(reader.color_files)):
-      args.append((reader, [i], est, debug, ob_id, "cuda:0"))
+        args.append((reader, [i], est, debug, ob_id, "cuda:0"))
 
     outs = []
     for arg in args:
-      out = run_pose_estimation_worker(*arg)
-      outs.append(out)
+        out = run_pose_estimation_worker(*arg)
+        outs.append(out)
 
     for out in outs:
-      for video_id in out:
-        for id_str in out[video_id]:
-          for ob_id in out[video_id][id_str]:
-            res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
+        for video_id in out:
+            for id_str in out[video_id]:
+                for ob_id in out[video_id][id_str]:
+                    res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
 
   with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
-    yaml.safe_dump(make_yaml_dumpable(res), ff)
+      yaml.safe_dump(make_yaml_dumpable(res), ff)
 
 
-if __name__=='__main__':
-  parser = argparse.ArgumentParser()
-  code_dir = os.path.dirname(os.path.realpath(__file__))
-  parser.add_argument('--linemod_dir', type=str, default="/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/LINEMOD", help="linemod root dir")
-  parser.add_argument('--use_reconstructed_mesh', type=int, default=0)
-  parser.add_argument('--ref_view_dir', type=str, default="/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/YCB_Video/bowen_addon/ref_views_16")
-  parser.add_argument('--debug', type=int, default=0)
-  parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
-  opt = parser.parse_args()
-  set_seed(0)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    code_dir = os.path.dirname(os.path.realpath(__file__))
+    
+    # Add arguments for LINEMOD directory and other settings
+    parser.add_argument('--linemod_dir', type=str, default="/Linemod_preprocessed", help="LINEMOD root directory")
+    parser.add_argument('--use_reconstructed_mesh', type=int, default=0, help="Use reconstructed mesh or ground truth")
+    parser.add_argument('--ref_view_dir', type=str, default="/Linemod_preprocessed/ref_views")
+    parser.add_argument('--debug', type=int, default=0, help="Debug level")
+    parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug', help="Directory to save debug info")
 
-  detect_type = 'mask'   # mask / box / detected
+    opt = parser.parse_args()
 
-  run_pose_estimation()
+    # Set a random seed for reproducibility
+    set_seed(0)
+
+    # Define detection type (mask, box, or detected)
+    detect_type = 'mask'
+
+    # Run pose estimation
+    run_pose_estimation()
