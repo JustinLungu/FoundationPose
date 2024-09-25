@@ -415,6 +415,7 @@ class LinemodOcclusionReader(BopBaseReader):
     super().__init__(base_dir, zfar=zfar)
     self.dataset_name = 'lmo'
     self.K = list(self.K_table.values())[0]
+    self.obs_ids = [1]
     self.ob_ids = [1,5,6,8,9,10,11,12]
     self.ob_id_to_names = {
       1: 'ape',
@@ -475,7 +476,7 @@ class LinemodReader(LinemodOcclusionReader):
     Fetches the ground truth pose for a given frame and object ID.
     """
     # Debugging: print frame and object id info
-    print(f"[DEBUG] Accessing ground truth pose for frame {i_frame}, object ID {ob_id}")
+    #print(f"[DEBUG] Accessing ground truth pose for frame {i_frame}, object ID {ob_id}")
     
     # Ensure the frame index is kept as an integer
     gt_data = self.scene_gt
@@ -489,7 +490,7 @@ class LinemodReader(LinemodOcclusionReader):
     # Now, loop through the objects in this frame and find the one with matching obj_id
     for obj_data in gt_data[frame_index]:
         if obj_data['obj_id'] == ob_id:
-            print(f"[DEBUG] Found matching object ID {ob_id} in frame {frame_index}")
+            #print(f"[DEBUG] Found matching object ID {ob_id} in frame {frame_index}")
             return obj_data  # Return the ground truth pose for this object
     
     # If we didn't find a match

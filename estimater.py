@@ -156,8 +156,8 @@ class FoundationPose:
     zc = np.median(depth[valid])
     
     # Print the current values for debugging purposes
-    print(f"[DEBUG] uc: {uc}, vc: {vc}, zc: {zc}")
-    print(f"[DEBUG] K matrix: {K}, shape: {K.shape}")
+    #print(f"[DEBUG] uc: {uc}, vc: {vc}, zc: {zc}")
+    #print(f"[DEBUG] K matrix: {K}, shape: {K.shape}")
     
     # Ensure K is a valid 3x3 matrix
     if K.ndim != 2 or K.shape != (3, 3):
@@ -200,7 +200,7 @@ class FoundationPose:
       cv2.imwrite(f'{self.debug_dir}/ob_mask.png', (ob_mask*255.0).clip(0,255))
 
     if ob_mask.ndim == 3:
-      print("[DEBUG] Converting ob_mask from RGB to grayscale")
+      #print("[DEBUG] Converting ob_mask from RGB to grayscale")
       ob_mask = ob_mask[:, :, 0]  # Assuming the mask is binary and any one channel (like red) will suffice
 
 

@@ -63,6 +63,10 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
       id_str = reader.id_strs[i_frame]
       H, W = color.shape[:2]
 
+      # Limit to processing only object ID 1 (or another desired object ID)
+      if ob_id != 1:
+        continue  # Skip other objects
+
       # Extract the K matrix for the current frame as a NumPy array
       frame_key = str(i_frame).zfill(6)  # Ensure the frame number is zero-padded to match the dictionary keys
       if frame_key not in reader.K:
@@ -111,6 +115,10 @@ def run_pose_estimation():
 
   for ob_id in reader_tmp.ob_ids:
     ob_id = int(ob_id)
+
+    if ob_id != 1:
+      continue  # Skip other objects
+
     if use_reconstructed_mesh:
         mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
     else:
@@ -145,6 +153,8 @@ def run_pose_estimation():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     code_dir = os.path.dirname(os.path.realpath(__file__))
+
+    print("CODE DIR", code_dir)
     
     # Add arguments for LINEMOD directory and other settings
     parser.add_argument('--linemod_dir', type=str, default="/Linemod_preprocessed", help="LINEMOD root directory")
