@@ -13,6 +13,9 @@ import argparse
 
 
 if __name__=='__main__':
+
+  ########################### SPECIFY HOW IN-DEPTH SHOULD THE MODEL GET IN TERMS OF PREDICTIONS ###########
+
   parser = argparse.ArgumentParser()
   code_dir = os.path.dirname(os.path.realpath(__file__))
   parser.add_argument('--mesh_file', type=str, default=f'{code_dir}/demo_data/kinect_driller_seq/mesh/textured_mesh.obj')
@@ -21,20 +24,24 @@ if __name__=='__main__':
   parser.add_argument('--track_refine_iter', type=int, default=2)
   #Iustin: by putting debug to 2 you will make the process very slow
   #debug = 2 will also put a lot of files in the debug folder (as well as populate track_vis folder)
-  parser.add_argument('--debug', type=int, default=1)
+  #debug = 1 will show you the window on how the prediction actually happens
+  #debug = 0 just populates the ob_in_cam folder in debug
+  parser.add_argument('--debug', type=int, default=0)
   parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
   args = parser.parse_args()
 
   set_logging_format()
   set_seed(0)
 
+  ###################### INITIALIZE THE "DEPENDENCIES" AND PREP FOLDERS ###################################
+  #"Activate all systems"
   mesh = trimesh.load(args.mesh_file)
 
   debug = args.debug
   debug_dir = args.debug_dir
   os.system(f'rm -rf {debug_dir}/* && mkdir -p {debug_dir}/track_vis {debug_dir}/ob_in_cam')
 
-  to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
+  to_origin, extents = trimesh.bounds.oriented_bounds(mesh) #this is something the other datasets don't have
   bbox = np.stack([-extents/2, extents/2], axis=0).reshape(2,3)
 
   scorer = ScorePredictor()
@@ -42,9 +49,11 @@ if __name__=='__main__':
   glctx = dr.RasterizeCudaContext()
   est = FoundationPose(model_pts=mesh.vertices, model_normals=mesh.vertex_normals, mesh=mesh, scorer=scorer, refiner=refiner, debug_dir=debug_dir, debug=debug, glctx=glctx)
   logging.info("estimator initialization done")
-
+  # object to read data (apparently identical to how it is done for ycb)
   reader = YcbineoatReader(video_dir=args.test_scene_dir, shorter_side=None, zfar=np.inf)
 
+
+  ################################ ACTUAL LOGIC / PREDICTING ON THE READ DATA ###############################
   for i in range(len(reader.color_files)):
     logging.info(f'i:{i}')
     color = reader.get_color(i)
@@ -63,6 +72,8 @@ if __name__=='__main__':
         o3d.io.write_point_cloud(f'{debug_dir}/scene_complete.ply', pcd)
     else:
       pose = est.track_one(rgb=color, depth=depth, K=reader.K, iteration=args.track_refine_iter)
+
+    ################################ SAVING THE PREDICTED INFORMATION ##########################################
 
     os.makedirs(f'{debug_dir}/ob_in_cam', exist_ok=True)
     np.savetxt(f'{debug_dir}/ob_in_cam/{reader.id_strs[i]}.txt', pose.reshape(4,4))
