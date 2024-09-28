@@ -64,7 +64,7 @@ demo_data/
 coverage.xml
 *.cover
 demo_data/
-#debug/
+debug/
 weights/
 *.py,cover
 .hypothesis/
