@@ -26,7 +26,7 @@ if __name__=='__main__':
   #debug = 2 will also put a lot of files in the debug folder (as well as populate track_vis folder)
   #debug = 1 will show you the window on how the prediction actually happens
   #debug = 0 just populates the ob_in_cam folder in debug
-  parser.add_argument('--debug', type=int, default=0)
+  parser.add_argument('--debug', type=int, default=1)
   parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
   args = parser.parse_args()
 
