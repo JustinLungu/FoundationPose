@@ -36,3 +36,11 @@ https://paperswithcode.com/dataset/linemod-1
 https://www.ycbbenchmarks.com/#:~:text=YCB%20Object%20and%20Model%20Set,some%20widely%20used%20manipulation%20tests.
 https://github.com/hz-ants/FFB6D?tab=readme-ov-file#datasets
 https://github.com/ethnhe/PVN3D/tree/master
+
+
+
+
+
+https://www.connectedpapers.com/main/dc4c9ae8c0cfc08ff6392aff69b0fd170da398a4/FoundationPose%3A-Unified-6D-Pose-Estimation-and-Tracking-of-Novel-Objects/graph
+https://www.semanticscholar.org/paper/OnePose%3A-One-Shot-Object-Pose-Estimation-without-Sun-Wang/37f991349a7d389880d1ff0c62b248b64c296211
+https://zju3dv.github.io/onepose_plus_plus/
