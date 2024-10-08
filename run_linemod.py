@@ -52,170 +52,282 @@ def get_mask(reader, i_frame, ob_id, detect_type):
 
   The mask will be used later in the pipeline to constrain where the model looks for the object.
   """
-  if detect_type=='box':
+
+  # Case 1: If the detection type is 'box', we are manually constructing a bounding box
+  if detect_type == 'box':
+    # Get the object mask for the given frame and object ID from the reader (could be a binary mask)
     mask = reader.get_mask(i_frame, ob_id)
-    H,W = mask.shape[:2]
-    vs,us = np.where(mask>0)
-    umin = us.min()
-    umax = us.max()
-    vmin = vs.min()
-    vmax = vs.max()
-    valid = np.zeros((H,W), dtype=bool)
-    valid[vmin:vmax,umin:umax] = 1
-  elif detect_type=='mask':
+    H, W = mask.shape[:2]  # Get the height and width of the mask
+    vs, us = np.where(mask > 0)  # Find the pixels where the mask is non-zero (object area)
+    
+    #bounding box coordinates around the object
+    #us = x-coordinate, vs = y-coordinate
+    umin = us.min()  
+    umax = us.max()  
+    vmin = vs.min()  
+    vmax = vs.max()  
+    
+    # Create a valid mask of zeros (same size as the image) and set the object area to 1
+    valid = np.zeros((H, W), dtype=bool)  # init empty boolean mask (all False)
+    valid[vmin:vmax, umin:umax] = 1  #set region inside bounding box to True
+
+  # Case 2: If the detection type is 'mask', we are using a pre-existing binary mask
+  elif detect_type == 'mask':
+    # Get the object mask for the given frame and object ID from the reader
     mask = reader.get_mask(i_frame, ob_id)
     if mask is None:
-      return None
-    valid = mask>0
-  elif detect_type=='detected':
-    mask = cv2.imread(reader.color_files[i_frame].replace('rgb','mask_cosypose'), -1)
-    valid = mask==ob_id
+      return None  # If no mask is found, return None to indicate that the object wasn't detected
+    
+    # Convert the mask into a boolean array where pixels with value > 0 are considered valid
+    valid = mask > 0
+
+  # Case 3: If the detection type is 'detected', load a pre-generated mask file from disk
+  elif detect_type == 'detected':
+    # Load the mask file from the disk (using the color file path but replacing 'rgb' with 'mask_cosypose')
+    mask = cv2.imread(reader.color_files[i_frame].replace('rgb', 'mask_cosypose'), -1)
+    
+    # Check if the mask value matches the object ID (creating a boolean mask)
+    valid = mask == ob_id
+
+  #invalid detection type --> raise an error
   else:
     raise RuntimeError
-  return valid
 
+  return valid  # valid mask: a boolean array indicating where the object is
 
 
 def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, debug=0, ob_id=None, device='cuda:0'):
-  """
-  Sets up the environment for running pose estimation (e.g., selecting the GPU, setting up the rendering context).
+    """
+    This function runs pose estimation for a sequence of frames for a single object. 
 
-  Loops through each frame and:
-    - Reads the color and depth images for the frame.
-    - Extracts the camera intrinsics (K matrix) and the object mask.
-    - Calls the FoundationPose model to estimate the 6D pose of the object in that frame.
-    - If debug is enabled, it exports the transformed mesh for visualization.
+    It performs the following steps:
+    - Sets up the environment for pose estimation, such as configuring the GPU device and initializing rendering context.
+    - Iterates over the frames, fetching image data, camera intrinsics (K matrix), and object masks for each frame.
+    - Uses the FoundationPose model to estimate the 6D pose of the object in the frame.
+    - Optionally outputs a 3D visualization of the objects predicted pose for debugging purposes.
+    - Stores the pose result in a nested dictionary for each frame and object.
 
-  The final result is stored in a nested dictionary (NestDict), with the pose estimates for each object in each frame.
-  """
-  result = NestDict()
-  torch.cuda.set_device(device)
-  est.to_device(device)
-  est.glctx = dr.RasterizeCudaContext(device=device)
-  debug_dir = est.debug_dir
+    Parameters:
+    - reader: Data reader object, providing access to images, masks, intrinsics, etc.
+    - i_frames: List of frame indices to process.
+    - est: Instance of FoundationPose model, used to perform the actual pose estimation.
+    - debug: Debug level, controls the amount of logging and visualization.
+    - ob_id: Object ID to process.
+    - device: Device to run the computations on (default is 'cuda:0').
 
-  for i, i_frame in enumerate(i_frames):
-      logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
-      video_id = reader.get_video_id()
-      color = reader.get_color(i_frame)
-      depth = reader.get_depth(i_frame)
-      id_str = reader.id_strs[i_frame]
-      H, W = color.shape[:2]
+    Returns:
+    - result: Nested dictionary containing pose estimates for each frame and object.
+    """
+    # Initialize the result storage, a nested dictionary to store pose estimates per frame
+    result = NestDict()
 
-      # Limit to processing only object ID 1 (or another desired object ID)
-      if ob_id != 1:
-        continue  # Skip other objects
+    # Set the GPU device where computations will be executed
+    torch.cuda.set_device(device)
 
-      # Extract the K matrix for the current frame as a NumPy array
-      frame_key = str(i_frame).zfill(6)  # Ensure the frame number is zero-padded to match the dictionary keys
-      if frame_key not in reader.K:
-          logging.error(f"K matrix not found for frame {frame_key}. Skipping.")
-          result[video_id][id_str][ob_id] = np.eye(4)
-          continue
-      
-      K_matrix = np.array(reader.K[frame_key])  # Convert K to a NumPy array
+    # Send the pose estimation model to the GPU
+    est.to_device(device)
 
-      ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
-      if ob_mask is None:
-          logging.info("ob_mask not found, skip")
-          result[video_id][id_str][ob_id] = np.eye(4)
-          continue
+    # Initialize a rendering context for rasterization (for rendering the object during estimation)
+    # import nvdiffrast.torch as dr coming from Utils
+    est.glctx = dr.RasterizeCudaContext(device=device)
 
-      est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
+    # Store the directory for debugging (where files may be saved)
+    debug_dir = est.debug_dir
 
-      # Pass the K matrix as a NumPy array to the register function
-      pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
-      logging.info(f"pose:\n{pose}")
+    # Loop over each frame index in the i_frames list
+    for i, i_frame in enumerate(i_frames):
+        logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
+        
+        # Get the video ID, color image, and depth image for the current frame
+        video_id = reader.get_video_id()
+        color = reader.get_color(i_frame)
+        depth = reader.get_depth(i_frame)
+        
+        # Get the string ID for the current frame (might be frame number as a string)
+        id_str = reader.id_strs[i_frame]
+        
+        # Get the height and width of the color image
+        H, W = color.shape[:2]
 
-      if debug >= 3:
-          m = est.mesh_ori.copy()
-          tmp = m.copy()
-          tmp.apply_transform(pose)
-          tmp.export(f'{debug_dir}/model_tf.obj')
+        # Limit processing to object ID 1 (or another desired object ID)
+        if ob_id != 1:
+            continue  # Skip other objects if it's not the desired object
 
-      result[video_id][id_str][ob_id] = pose
+        # Extract the camera intrinsic matrix (K matrix) for the current frame as a NumPy array
+        frame_key = str(i_frame).zfill(6)  # Zero-pad the frame number to match dictionary keys
+        if frame_key not in reader.K:
+            logging.error(f"K matrix not found for frame {frame_key}. Skipping.")
+            result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if K matrix is not found
+            continue
+        
+        # Convert the K matrix to a NumPy array
+        K_matrix = np.array(reader.K[frame_key])
 
-  return result
+        # Get the object mask for the current frame and object ID using the `get_mask` function
+        ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
+        if ob_mask is None:
+            logging.info("ob_mask not found, skip")
+            result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if the mask is not found
+            continue
+
+        # Retrieve the ground truth pose for the object in the current frame (if available)
+        est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
+
+        # Perform pose estimation using the FoundationPose model's `register` function
+        pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
+        logging.info(f"pose:\n{pose}")
+
+        # If debugging level is high (>= 3), save a transformed version of the object mesh
+        if debug >= 3:
+            m = est.mesh_ori.copy()  # Make a copy of the original mesh
+            tmp = m.copy()
+            tmp.apply_transform(pose)  # Apply the estimated transformation to the mesh
+            tmp.export(f'{debug_dir}/model_tf.obj')  # Export the transformed mesh for visualization
+
+        # Store the estimated pose in the result dictionary for this frame and object
+        result[video_id][id_str][ob_id] = pose
+
+    # Return the result dictionary, which contains the pose estimates for each frame and object
+    return result
+
 
 
 
 def run_pose_estimation():
   """
   This is the main function that orchestrates the entire pose estimation process:
-    - Sets up the reader for the LINEMOD dataset (LinemodReader).
-    - Loads the mesh for each object in the dataset and resets the model for each object.
-    - Runs the pose estimation worker function for each frame.
-    - Saves the results (poses for each frame and object) in a YAML file (linemod_res.yml).
+    - Initializes the LINEMOD dataset reader (LinemodReader).
+    - Configures the mesh for each object in the dataset (either ground truth or reconstructed mesh).
+    - Resets the pose estimation model with the mesh data for each object.
+    - Runs the pose estimation for each frame and each object, one by one.
+    - Collects the results (6D poses for each object in each frame) and saves them in a YAML file (linemod_res.yml).
   """
+  
+  # Load any necessary resources for the process, particularly forcing CUDA loading.
+  # import warp as wp
   wp.force_load(device='cuda')
+  
+  # Initialize the LINEMOD dataset reader for the first object (01) and split the data.
   reader_tmp = LinemodReader(f'Linemod_preprocessed/data/01', split=None)
 
+  # Set debug and other options based on user arguments passed via `opt`
   debug = opt.debug
   use_reconstructed_mesh = opt.use_reconstructed_mesh
   debug_dir = opt.debug_dir
 
+  # nested dictionary to store the pose estimation results
   res = NestDict()
+  
+  # Set up a rasterization context for rendering the mesh.
   glctx = dr.RasterizeCudaContext()
+  
+  # Create a temporary 3D box mesh (using `trimesh` library) for initialization purposes.
+  # This will later be replaced by the actual object meshes during the loop.
   mesh_tmp = trimesh.primitives.Box(extents=np.ones((3)), transform=np.eye(4)).to_mesh()
-  est = FoundationPose(model_pts=mesh_tmp.vertices.copy(), model_normals=mesh_tmp.vertex_normals.copy(), symmetry_tfs=None, mesh=mesh_tmp, scorer=None, refiner=None, glctx=glctx, debug_dir=debug_dir, debug=debug)
+  
+  # Initialize the FoundationPose model. This model estimates 6D poses from images.
+  # - `model_pts` and `model_normals`: The vertices and normals of the object mesh.
+  # - `symmetry_tfs`: Information about the object's symmetry transformations (e.g., rotational symmetry).
+  # - `scorer`, `refiner`: These are placeholders and can be None here.
+  # - `glctx`: The rasterization context for rendering the object.
+  # - `debug_dir` and `debug`: Directories and settings for saving debug information.
+  est = FoundationPose(
+     model_pts=mesh_tmp.vertices.copy(), 
+     model_normals=mesh_tmp.vertex_normals.copy(), 
+     symmetry_tfs=None, 
+     mesh=mesh_tmp, 
+     scorer=None, 
+     refiner=None, 
+     glctx=glctx, 
+     debug_dir=debug_dir, 
+     debug=debug
+     )
 
+  # Loop through all object IDs in the dataset (ob_ids). In this example, we limit to object ID 1.
   for ob_id in reader_tmp.ob_ids:
-    ob_id = int(ob_id)
+    ob_id = int(ob_id)  # Ensure object ID is an integer.
 
+    # Skip all objects except object ID 1 (can be modified to work with other objects).
     if ob_id != 1:
-      continue  # Skip other objects
+      continue
 
+    # Select the mesh for the object:
+    # If `use_reconstructed_mesh` is enabled, use the reconstructed mesh; otherwise, use the ground truth mesh.
     if use_reconstructed_mesh:
         mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
     else:
         mesh = reader_tmp.get_gt_mesh(ob_id)
+
+    
+    # Get the symmetry transformations (if any) for the current object.
+    #for us is just a 4x4 identity matrix
     symmetry_tfs = reader_tmp.symmetry_tfs[ob_id]
 
+    # List to store the arguments for pose estimation.
     args = []
 
+    # Set up the directory for the object’s dataset (color, depth, mask files, etc.).
     video_dir = f'Linemod_preprocessed/data/{ob_id:02d}'
-    reader = LinemodReader(video_dir, split=None)
-    video_id = reader.get_video_id()
+    reader = LinemodReader(video_dir, split=None)  # Initialize the reader for this specific object.
+    video_id = reader.get_video_id()  # Get the video ID for this object.
+
+    # Reset the pose estimator (`FoundationPose`) to the new object's mesh and parameters.
     est.reset_object(model_pts=mesh.vertices.copy(), model_normals=mesh.vertex_normals.copy(), symmetry_tfs=symmetry_tfs, mesh=mesh)
 
+    # Loop through each frame (each image in the dataset) for this object.
     for i in range(len(reader.color_files)):
+        # Collect the arguments needed to run the pose estimation worker function.
         args.append((reader, [i], est, debug, ob_id, "cuda:0"))
 
+    # Store the results of the pose estimation.
     outs = []
     for arg in args:
+        # Run the pose estimation for each frame and store the output.
         out = run_pose_estimation_worker(*arg)
         outs.append(out)
 
+    #organizing the pose estimation results in a nested disctionary structure
     for out in outs:
         for video_id in out:
             for id_str in out[video_id]:
                 for ob_id in out[video_id][id_str]:
                     res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
 
+  # Save the results to a YAML file in the debug directory.
   with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
       yaml.safe_dump(make_yaml_dumpable(res), ff)
 
-
 if __name__ == '__main__':
+    """
+    This is the entry point of the script. It sets up the command-line arguments, configures settings 
+    like directories and debug options, and calls the `run_pose_estimation` function to start the 
+    6D pose estimation process on the LINEMOD dataset.
+    """
+    
+    # Create an argument parser to allow the user to provide configuration options from the command line.
     parser = argparse.ArgumentParser()
     code_dir = os.path.dirname(os.path.realpath(__file__))
-
     print("CODE DIR", code_dir)
+
+    # Define command-line arguments that can be passed to the script:
     
-    # Add arguments for LINEMOD directory and other settings
     parser.add_argument('--linemod_dir', type=str, default="/Linemod_preprocessed", help="LINEMOD root directory")
+    #choose whether to use reconstructed meshes (1) or the ground truth meshes (0, default).
     parser.add_argument('--use_reconstructed_mesh', type=int, default=0, help="Use reconstructed mesh or ground truth")
+    # directory containing reference views for mesh reconstruction (default path provided).
     parser.add_argument('--ref_view_dir', type=str, default="/Linemod_preprocessed/ref_views")
     parser.add_argument('--debug', type=int, default=0, help="Debug level")
     parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug', help="Directory to save debug info")
 
-    opt = parser.parse_args()
 
-    # Set a random seed for reproducibility
+    opt = parser.parse_args()
     set_seed(0)
 
-    # Define detection type (mask, box, or detected)
+    # Define the type of detection to be used in the pose estimation process. 
+    # This determines how the object will be detected in the images.
+    # Options include:
+    # - 'mask': Uses a pre-computed binary mask for each object.
+    # - 'box': Uses a bounding box around the object.
+    # - 'detected': Uses a pre-generated mask from another detector (e.g., CosyPose).
     detect_type = 'mask'
-
-    # Run pose estimation
     run_pose_estimation()

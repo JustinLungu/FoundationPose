@@ -377,6 +377,26 @@ class BopBaseReader:
 
 
   def load_symmetry_tfs(self):
+    """
+    Loads the symmetry transformations for each object in the dataset.
+
+    This function loads the symmetry information from the `models_info.yml` file, which contains 
+    details about discrete and continuous symmetries for objects. These symmetries are used to 
+    handle objects with identical appearances from multiple orientations (e.g., cylindrical objects).
+
+    The function extracts the symmetry transformation matrices and stores them in the `symmetry_tfs` 
+    attribute, which will be used for pose refinement and other operations.
+
+    It also populates `symmetry_info_table` and `geometry_symmetry_info_table` with the symmetry data for 
+    each object.
+
+    Args:
+        None
+
+    Returns:
+        None: Populates the `symmetry_tfs` and `symmetry_info_table` attributes.
+    """
+
     dir = os.path.dirname(self.get_gt_mesh_file(self.ob_ids[0]))
     info_file = f'{dir}/models_info.yml'
 
@@ -390,9 +410,10 @@ class BopBaseReader:
     self.symmetry_tfs = {}
     self.symmetry_info_table = {}
 
+
     for ob_id in self.ob_ids:
         # Print the current object ID for debugging
-        print(f"Current object ID: {ob_id}")
+        #print(f"Current object ID: {ob_id}")
 
         # Convert ob_id to an integer for comparison
         if ob_id not in info:
@@ -416,7 +437,7 @@ class LinemodOcclusionReader(BopBaseReader):
     self.dataset_name = 'lmo'
     self.K = list(self.K_table.values())[0]
     self.obs_ids = [1]
-    self.ob_ids = [1,5,6,8,9,10,11,12]
+    self.ob_ids = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
     self.ob_id_to_names = {
       1: 'ape',
       2: 'benchvise',
@@ -507,6 +528,9 @@ class LinemodReader(LinemodOcclusionReader):
               mesh_dir = f'{root}/models/obj_{ob_id:02d}.ply'
               break
           else:
+              #If the models directory is not found, 
+              # it moves one level up in the directory tree (../) 
+              # and repeats the search until it finds the models directory.
               root = os.path.abspath(f'{root}/../')
       return mesh_dir
 

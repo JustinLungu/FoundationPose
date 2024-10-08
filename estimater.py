@@ -42,40 +42,87 @@ class FoundationPose:
 
 
   def reset_object(self, model_pts, model_normals, symmetry_tfs=None, mesh=None):
+    """
+    Resets the pose estimator for a new object. This involves adjusting the object's 
+    mesh data, computing its diameter, voxelizing its point cloud, and preparing the 
+    symmetry transformations (if any). This function prepares the 3D model for future 
+    pose estimation operations by setting up various data structures.
+
+    Args:
+        model_pts (ndarray): Points representing the vertices of the object's 3D mesh.
+        model_normals (ndarray): Normals for the vertices of the mesh.
+        symmetry_tfs (ndarray, optional): Symmetry transformations for the object (if it has any). 
+                                          Defaults to None.
+        mesh (trimesh.Trimesh, optional): The 3D mesh of the object. If None, no mesh operations are done.
+
+    Sets:
+        - `self.mesh_ori`: A copy of the original mesh.
+        - `self.diameter`: The computed diameter of the object based on the mesh.
+        - `self.pts`: A voxelized version of the mesh's point cloud.
+        - `self.normals`: The normalized vertex normals of the point cloud.
+        - `self.symmetry_tfs`: Symmetry transformation matrices for the object.
+    """
+
+    # Compute the bounding box of the object's mesh.
     max_xyz = mesh.vertices.max(axis=0)
     min_xyz = mesh.vertices.min(axis=0)
-    self.model_center = (min_xyz+max_xyz)/2
-    if mesh is not None:
-      self.mesh_ori = mesh.copy()
-      mesh = mesh.copy()
-      mesh.vertices = mesh.vertices - self.model_center.reshape(1,3)
 
+    # Compute the object's center.
+    self.model_center = (min_xyz + max_xyz) / 2
+
+    if mesh is not None:
+        # Save a copy of the original mesh and center the mesh by subtracting its center from its vertices.
+        self.mesh_ori = mesh.copy()
+        mesh = mesh.copy()
+        mesh.vertices = mesh.vertices - self.model_center.reshape(1, 3)
+
+    # Update the model points based on the modified (centered) mesh.
     model_pts = mesh.vertices
+
+    # Compute the diameter of the object based on the mesh, used for scaling and binning.
     self.diameter = compute_mesh_diameter(model_pts=mesh.vertices, n_sample=10000)
-    self.vox_size = max(self.diameter/20.0, 0.003)
+    self.vox_size = max(self.diameter / 20.0, 0.003)
+
     logging.info(f'self.diameter:{self.diameter}, vox_size:{self.vox_size}')
-    self.dist_bin = self.vox_size/2
-    self.angle_bin = 20  # Deg
+
+    # Distance binning for matching depth or position data to the voxel grid.
+    self.dist_bin = self.vox_size / 2
+
+    # Angle bin size in degrees (used for rotation estimation).
+    self.angle_bin = 20
+
+    # Convert the model points to an Open3D point cloud and downsample it using the voxel size.
     pcd = toOpen3dCloud(model_pts, normals=model_normals)
     pcd = pcd.voxel_down_sample(self.vox_size)
+
+    # Compute the bounding box of the downsampled point cloud.
     self.max_xyz = np.asarray(pcd.points).max(axis=0)
     self.min_xyz = np.asarray(pcd.points).min(axis=0)
+
+    # Convert the point cloud and normals into tensors for GPU processing.
     self.pts = torch.tensor(np.asarray(pcd.points), dtype=torch.float32, device='cuda')
     self.normals = F.normalize(torch.tensor(np.asarray(pcd.normals), dtype=torch.float32, device='cuda'), dim=-1)
+
     logging.info(f'self.pts:{self.pts.shape}')
+
+    # Save the mesh to a temporary file if it's not None.
     self.mesh_path = None
     self.mesh = mesh
     if self.mesh is not None:
-      self.mesh_path = f'/tmp/{uuid.uuid4()}.obj'
-      self.mesh.export(self.mesh_path)
+        self.mesh_path = f'/tmp/{uuid.uuid4()}.obj'
+        self.mesh.export(self.mesh_path)
+
+    # Convert the mesh to GPU-compatible tensors (vertices, faces, etc.).
     self.mesh_tensors = make_mesh_tensors(self.mesh)
 
+    # Set up the symmetry transformation matrices, defaulting to identity if none are provided.
     if symmetry_tfs is None:
-      self.symmetry_tfs = torch.eye(4).float().cuda()[None]
+        self.symmetry_tfs = torch.eye(4).float().cuda()[None]  # Identity matrix for no symmetry
     else:
-      self.symmetry_tfs = torch.as_tensor(symmetry_tfs, device='cuda', dtype=torch.float)
+        self.symmetry_tfs = torch.as_tensor(symmetry_tfs, device='cuda', dtype=torch.float)
 
     logging.info("reset done")
+
 
 
 

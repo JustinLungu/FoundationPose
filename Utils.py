@@ -804,6 +804,23 @@ def projection_matrix_from_intrinsics(K, height, width, znear, zfar, window_coor
 
 
 def symmetry_tfs_from_info(info, rot_angle_discrete=5):
+  """
+    Generates symmetry transformation matrices based on the symmetry information.
+
+    This function takes the symmetry information for an object (from `models_info.yml`) and constructs 
+    transformation matrices that account for discrete and continuous symmetries.
+
+    Discrete symmetries are directly loaded from the YAML file, while continuous symmetries (such as rotation 
+    around an axis) are generated using Euler angles with a specified discrete step (rot_angle_discrete).
+
+    Args:
+        info (dict): Symmetry information from the `models_info.yml` file for a given object.
+        rot_angle_discrete (int): Step size (in degrees) for discretizing continuous symmetries, default is 5 degrees.
+
+    Returns:
+        np.ndarray: An array of symmetry transformation matrices.
+  """
+  #create a 4x4 identity matrix
   symmetry_tfs = [np.eye(4)]
   if 'symmetries_discrete' in info:
     tfs = np.array(info['symmetries_discrete']).reshape(-1,4,4)
