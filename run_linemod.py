@@ -6,15 +6,32 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+"""
+This script is designed to run pose estimation using the FoundationPose model 
+on the LINEMOD dataset, a popular dataset used for 6D object pose estimation. 
+The script processes individual frames of RGB-D images, extracts the necessary 
+information (like masks, camera intrinsics, and object poses), and then estimates 
+the object pose for each frame using FoundationPose.
 
+
+Key Requirements for FoundationPose Model to Predict:
+To run FoundationPose for pose estimation, the following is required:
+
+  - Object Mesh (3D model): Either the ground-truth mesh or a reconstructed mesh.
+  - Camera Intrinsics (K Matrix): These must be extracted for each frame.
+  - Object Mask: A binary mask that highlights the region where the object is present.
+  - RGB and Depth Images: For each frame, the pose estimation uses both RGB and depth data.
+  - Ground Truth Pose (optional): Only needed if you want to compare or evaluate the accuracy of predictions.
+"""
+
+
+
+"""
+datareader.py and estimater.py handle reading the data and estimating the pose using FoundationPose.
+Utils contains helper functions related to the model or data processing.
+"""
 from Utils import *
-import json,uuid,joblib,os,sys
-import scipy.spatial as spatial
-from multiprocessing import Pool
-import multiprocessing
-from functools import partial
-from itertools import repeat
-import itertools
+import os,sys
 from datareader import *
 from estimater import *
 code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -24,6 +41,17 @@ import yaml
 
 
 def get_mask(reader, i_frame, ob_id, detect_type):
+  """
+  This function extracts the object mask for a given frame and object ID. 
+  Depending on the detection type (box, mask, or detected), it processes 
+  the mask differently:
+
+  box: Extracts a bounding box around the object.
+  mask: Uses the binary mask for the object.
+  detected: Loads a pre-generated mask file from disk.
+
+  The mask will be used later in the pipeline to constrain where the model looks for the object.
+  """
   if detect_type=='box':
     mask = reader.get_mask(i_frame, ob_id)
     H,W = mask.shape[:2]
@@ -49,6 +77,17 @@ def get_mask(reader, i_frame, ob_id, detect_type):
 
 
 def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, debug=0, ob_id=None, device='cuda:0'):
+  """
+  Sets up the environment for running pose estimation (e.g., selecting the GPU, setting up the rendering context).
+
+  Loops through each frame and:
+    - Reads the color and depth images for the frame.
+    - Extracts the camera intrinsics (K matrix) and the object mask.
+    - Calls the FoundationPose model to estimate the 6D pose of the object in that frame.
+    - If debug is enabled, it exports the transformed mesh for visualization.
+
+  The final result is stored in a nested dictionary (NestDict), with the pose estimates for each object in each frame.
+  """
   result = NestDict()
   torch.cuda.set_device(device)
   est.to_device(device)
@@ -101,6 +140,13 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
 
 
 def run_pose_estimation():
+  """
+  This is the main function that orchestrates the entire pose estimation process:
+    - Sets up the reader for the LINEMOD dataset (LinemodReader).
+    - Loads the mesh for each object in the dataset and resets the model for each object.
+    - Runs the pose estimation worker function for each frame.
+    - Saves the results (poses for each frame and object) in a YAML file (linemod_res.yml).
+  """
   wp.force_load(device='cuda')
   reader_tmp = LinemodReader(f'Linemod_preprocessed/data/01', split=None)
 
