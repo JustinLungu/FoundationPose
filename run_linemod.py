@@ -127,12 +127,15 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
     # Send the pose estimation model to the GPU
     est.to_device(device)
 
+    
     # Initialize a rendering context for rasterization (for rendering the object during estimation)
     # import nvdiffrast.torch as dr coming from Utils
     est.glctx = dr.RasterizeCudaContext(device=device)
 
     # Store the directory for debugging (where files may be saved)
     debug_dir = est.debug_dir
+
+    print(len(i_frames))
 
     # Loop over each frame index in the i_frames list
     for i, i_frame in enumerate(i_frames):
@@ -191,8 +194,6 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
     return result
 
 
-
-
 def run_pose_estimation():
   """
   This is the main function that orchestrates the entire pose estimation process:
@@ -243,6 +244,7 @@ def run_pose_estimation():
      debug=debug
      )
 
+  outs = []
   # Loop through all object IDs in the dataset (ob_ids). In this example, we limit to object ID 1.
   for ob_id in reader_tmp.ob_ids:
     ob_id = int(ob_id)  # Ensure object ID is an integer.
@@ -263,8 +265,7 @@ def run_pose_estimation():
     #for us is just a 4x4 identity matrix
     symmetry_tfs = reader_tmp.symmetry_tfs[ob_id]
 
-    # List to store the arguments for pose estimation.
-    args = []
+    
 
     # Set up the directory for the object’s dataset (color, depth, mask files, etc.).
     video_dir = f'Linemod_preprocessed/data/{ob_id:02d}'
@@ -275,27 +276,25 @@ def run_pose_estimation():
     est.reset_object(model_pts=mesh.vertices.copy(), model_normals=mesh.vertex_normals.copy(), symmetry_tfs=symmetry_tfs, mesh=mesh)
 
     # Loop through each frame (each image in the dataset) for this object.
-    for i in range(len(reader.color_files)):
-        # Collect the arguments needed to run the pose estimation worker function.
-        args.append((reader, [i], est, debug, ob_id, "cuda:0"))
-
+    frame_batch = list(range(len(reader.color_files)))
     # Store the results of the pose estimation.
-    outs = []
-    for arg in args:
-        # Run the pose estimation for each frame and store the output.
-        out = run_pose_estimation_worker(*arg)
-        outs.append(out)
+    out = run_pose_estimation_worker(reader, frame_batch, est, debug, ob_id, "cuda:0")
+    outs.append(out)
 
-    #organizing the pose estimation results in a nested disctionary structure
-    for out in outs:
-        for video_id in out:
-            for id_str in out[video_id]:
-                for ob_id in out[video_id][id_str]:
-                    res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
-
+  #organizing the pose estimation results in a nested disctionary structure
+  for out in outs:
+      for video_id in out:
+          for id_str in out[video_id]:
+              for ob_id in out[video_id][id_str]:
+                  res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
+  
   # Save the results to a YAML file in the debug directory.
   with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
       yaml.safe_dump(make_yaml_dumpable(res), ff)
+
+
+
+
 
 if __name__ == '__main__':
     """

@@ -133,20 +133,50 @@ class FoundationPose:
 
 
   def to_device(self, s='cuda:0'):
+    """
+    Transfers all relevant attributes of the FoundationPose object to the specified device (e.g., GPU or CPU).
+
+    This function ensures that all tensors, models (e.g., neural networks), and mesh data within the object 
+    are moved to the desired computational device for efficient processing. It also transfers any associated
+    rendering context (glctx) to the device for rendering purposes.
+
+    Parameters:
+    -----------
+    s : str
+        The device to transfer the data to. Default is 'cuda:0', which refers to the first GPU.
+
+    Operations:
+    -----------
+    1. Transfers all attributes of the object that are PyTorch tensors or models to the specified device.
+    2. Transfers any mesh tensors stored in the `mesh_tensors` dictionary to the device.
+    3. Transfers the `refiner` and `scorer` models (if present) to the device.
+    4. Initializes the rendering context (glctx) on the specified device for rasterization.
+
+    """
+    # Loop through all attributes of the current object.
     for k in self.__dict__:
-      self.__dict__[k] = self.__dict__[k]
-      if torch.is_tensor(self.__dict__[k]) or isinstance(self.__dict__[k], nn.Module):
-        logging.info(f"Moving {k} to device {s}")
-        self.__dict__[k] = self.__dict__[k].to(s)
+        # If the attribute is a PyTorch tensor or neural network module, move it to the specified device.
+        if torch.is_tensor(self.__dict__[k]) or isinstance(self.__dict__[k], nn.Module):
+            #logging.info(f"Moving {k} to device {s}")
+            self.__dict__[k] = self.__dict__[k].to(s)
+
+    # Move any mesh-related tensors stored in the `mesh_tensors` dictionary to the specified device.
     for k in self.mesh_tensors:
-      logging.info(f"Moving {k} to device {s}")
-      self.mesh_tensors[k] = self.mesh_tensors[k].to(s)
+        #logging.info(f"Moving {k} to device {s}")
+        self.mesh_tensors[k] = self.mesh_tensors[k].to(s)
+
+    # If the refiner model exists, move it to the specified device.
     if self.refiner is not None:
-      self.refiner.model.to(s)
+        self.refiner.model.to(s)
+
+    # If the scorer model exists, move it to the specified device.
     if self.scorer is not None:
-      self.scorer.model.to(s)
+        self.scorer.model.to(s)
+
+    # Move the rasterization context to the specified device if it's already initialized.
     if self.glctx is not None:
-      self.glctx = dr.RasterizeCudaContext(s)
+        self.glctx = dr.RasterizeCudaContext(s)
+
 
 
 
