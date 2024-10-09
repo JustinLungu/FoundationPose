@@ -343,17 +343,56 @@ if wp is not None:
       out[h,w] = sum/sum_weight
 
   def bilateral_filter_depth(depth, radius=2, zfar=100, sigmaD=2, sigmaR=100000, device='cuda'):
+    """
+    Applies a bilateral filter to the input depth map to smooth depth values while preserving edges.
+
+    Bilateral filtering is used to smooth depth maps while retaining important object boundaries. This is achieved by considering both the spatial distance (how close two pixels are) and the range distance (how different the depth values are). The filter selectively smooths pixels based on the difference in depth values and their spatial location, avoiding over-smoothing at object boundaries.
+
+    Parameters:
+    ----------
+    depth : np.ndarray or torch.Tensor
+        The input depth map, which can be either a NumPy array or a PyTorch tensor.
+    radius : int, optional
+        The size of the neighborhood window (in pixels) around each pixel for the filter. Default is 2.
+    zfar : float, optional
+        The far clipping plane. Any depth values larger than this will be treated as invalid and set to zero. Default is 100.
+    sigmaD : float, optional
+        Standard deviation for the spatial component of the bilateral filter. This controls how much neighboring pixels influence each other based on their distance. Default is 2.
+    sigmaR : float, optional
+        Standard deviation for the range component of the bilateral filter. This controls how much neighboring pixels influence each other based on their depth difference. Default is 100000.
+    device : str, optional
+        The device on which the operation will be performed ('cuda' for GPU, 'cpu' for CPU). Default is 'cuda'.
+
+    Returns:
+    -------
+    depth_out : np.ndarray or torch.Tensor
+        The filtered depth map. The format of the output matches the format of the input (NumPy array or PyTorch tensor).
+    """
+
+    # Convert the input depth map to a Warp array if it is a NumPy array
     if isinstance(depth, np.ndarray):
-      depth_wp = wp.array(depth, dtype=float, device=device)
+        depth_wp = wp.array(depth, dtype=float, device=device)  # Warp array for NumPy input
     else:
-      depth_wp = wp.from_torch(depth)
+        depth_wp = wp.from_torch(depth)  # Convert PyTorch tensor to Warp tensor
+
+    # Create an empty output tensor to store the filtered depth map
     out_wp = wp.zeros(depth.shape, dtype=float, device=device)
-    wp.launch(kernel=bilateral_filter_depth_kernel, device=device, dim=[depth.shape[0], depth.shape[1]], inputs=[depth_wp, out_wp, radius, zfar, sigmaD, sigmaR])
+
+    # Launch the bilateral filter kernel using Warp API
+    wp.launch(kernel=bilateral_filter_depth_kernel, 
+              device=device, 
+              dim=[depth.shape[0], depth.shape[1]],  # Dimensions of the depth map (height, width)
+              inputs=[depth_wp, out_wp, radius, zfar, sigmaD, sigmaR])  # Inputs for the filter kernel
+
+    # Convert the result back to a PyTorch tensor
     depth_out = wp.to_torch(out_wp)
 
+    # If the input was a NumPy array, convert the output back to NumPy format
     if isinstance(depth, np.ndarray):
-      depth_out = depth_out.data.cpu().numpy()
-    return depth_out
+        depth_out = depth_out.data.cpu().numpy()
+
+    return depth_out  # Return the filtered depth map
+
 
 
   @wp.kernel(enable_backward=False)
@@ -385,14 +424,53 @@ if wp is not None:
 
 
   def erode_depth(depth, radius=2, depth_diff_thres=0.001, ratio_thres=0.8, zfar=100, device='cuda'):
-    depth_wp = wp.from_torch(torch.as_tensor(depth, dtype=torch.float, device=device))
-    out_wp = wp.zeros(depth.shape, dtype=float, device=device)
-    wp.launch(kernel=erode_depth_kernel, device=device, dim=[depth.shape[0], depth.shape[1]], inputs=[depth_wp, out_wp, radius, depth_diff_thres, ratio_thres, zfar],)
-    depth_out = wp.to_torch(out_wp)
+    """
+    Performs an erosion operation on the input depth map to clean up noise and invalid depth regions.
 
+    The function applies a custom kernel to reduce small, noisy depth values based on local neighborhood depth differences. This operation helps to remove depth artifacts and make the depth map more stable for further processing (such as 3D reconstruction or pose estimation).
+
+    Parameters:
+    ----------
+    depth : np.ndarray or torch.Tensor
+        The input depth map, which can be either a NumPy array or a PyTorch tensor.
+    radius : int, optional
+        The size of the neighborhood window (in pixels) around each pixel. Default is 2.
+    depth_diff_thres : float, optional
+        The depth difference threshold. If the depth difference between a pixel and its neighbors is larger than this threshold, the pixel will be eroded. Default is 0.001.
+    ratio_thres : float, optional
+        The ratio threshold for erosion. If the percentage of valid neighbors (within the depth difference threshold) is lower than this ratio, the pixel is eroded. Default is 0.8.
+    zfar : float, optional
+        The far clipping plane. Any depth values larger than this will be treated as invalid and set to zero. Default is 100.
+    device : str, optional
+        The device on which the operation will be performed ('cuda' for GPU, 'cpu' for CPU). Default is 'cuda'.
+
+    Returns:
+    -------
+    depth_out : np.ndarray or torch.Tensor
+        The eroded depth map. The format of the output matches the format of the input (NumPy array or PyTorch tensor).
+    """
+    
+    # Convert the input depth map to a Warp tensor if it is a PyTorch tensor
+    depth_wp = wp.from_torch(torch.as_tensor(depth, dtype=torch.float, device=device))
+    
+    # Create an empty output tensor to store the eroded depth map
+    out_wp = wp.zeros(depth.shape, dtype=float, device=device)
+    
+    # Launch a custom Warp kernel (erode_depth_kernel) to perform the erosion operation on the GPU
+    wp.launch(kernel=erode_depth_kernel, 
+              device=device, 
+              dim=[depth.shape[0], depth.shape[1]],  # The dimensions of the depth map (height, width)
+              inputs=[depth_wp, out_wp, radius, depth_diff_thres, ratio_thres, zfar])
+    
+    # Convert the result back to a PyTorch tensor
+    depth_out = wp.to_torch(out_wp)
+    
+    # If the input was a NumPy array, convert the output back to NumPy format
     if isinstance(depth, np.ndarray):
-      depth_out = depth_out.data.cpu().numpy()
-    return depth_out
+        depth_out = depth_out.data.cpu().numpy()
+    
+    return depth_out  # Return the eroded depth map
+
 
 
 

@@ -202,53 +202,105 @@ class FoundationPose:
 
 
   def generate_random_pose_hypo(self, K, rgb, depth, mask, scene_pts=None):
-    '''
-    @scene_pts: torch tensor (N,3)
-    '''
+    """
+    Generates a set of random pose hypotheses for an object in the scene.
+
+    This function creates initial guesses (hypotheses) for the object's pose by:
+    - Using a predefined grid of rotation matrices (`self.rot_grid`).
+    - Guessing the translation (position) of the object using the mask and depth map.
+    - Assigning the guessed translation to the predefined rotation matrices to form a set of pose hypotheses.
+
+    Returns:
+    -------
+    ob_in_cams : torch.Tensor
+        A tensor representing the set of pose hypotheses for the object.
+        Each pose is a 4x4 transformation matrix, where the top-left 3x3 submatrix is the rotation, 
+        and the rightmost column is the translation vector.
+    """
+
+    # Clone the predefined grid of rotation matrices (self.rot_grid)
     ob_in_cams = self.rot_grid.clone()
+
+    # Guess the translation (position) of the object using the mask and depth information.
     center = self.guess_translation(depth=depth, mask=mask, K=K)
-    ob_in_cams[:,:3,3] = torch.tensor(center, device='cuda', dtype=torch.float).reshape(1,3)
+
+    # Assign the guessed translation to the poses (the rightmost column of the 4x4 transformation matrix)
+    # The translation vector is placed in the last column of the transformation matrices
+    ob_in_cams[:, :3, 3] = torch.tensor(center, device='cuda', dtype=torch.float).reshape(1, 3)
+
+    # Return the set of pose hypotheses
     return ob_in_cams
 
 
+
   def guess_translation(self, depth, mask, K):
-    # Get the valid pixel coordinates where the mask is greater than 0
-    vs, us = np.where(mask > 0)
+    """
+    Guesses the translation vector (in 3D space) for an object by using the object's mask and depth information.
+
+    This function estimates the translation (position) of the object in the scene by:
+    - Identifying valid points in the mask and depth map.
+    - Computing the center of the object in pixel coordinates.
+    - Using the camera intrinsics (K matrix) to map the pixel coordinates and depth into 3D space.
+
+    Parameters:
+    ----------
+    depth : np.ndarray
+        The depth map for the current frame, where each pixel holds the depth value (distance to the camera) of the corresponding point in the scene.
+    mask : np.ndarray
+        A binary mask indicating where the object is located in the image (non-zero values mark the object).
+    K : np.ndarray
+        A 3x3 camera intrinsic matrix, which contains parameters like focal length and principal point of the camera.
+
+    Returns:
+    -------
+    center : np.ndarray
+        A 3D vector representing the estimated translation (position) of the object in the scene.
+        If no valid points are found, it returns a zero vector (3,).
+    """
+
+    # Get the valid pixel coordinates where the mask is non-zero (i.e., where the object is present)
+    vs, us = np.where(mask > 0)  # vs are the row indices (y-coordinates), us are the column indices (x-coordinates)
     
+    # If the mask is empty (no valid pixels), return a zero vector
     if len(us) == 0:
         logging.info(f'mask is all zero')
         return np.zeros((3))
     
-    # Compute the center of the mask
+    # Compute the center of the mask in pixel coordinates (uc, vc are the pixel coordinates of the mask center)
     uc = (us.min() + us.max()) / 2.0
     vc = (vs.min() + vs.max()) / 2.0
     
-    # Validate if depth and mask contain valid information
+    # Create a valid mask of pixels where both the mask is non-zero and the depth values are above a threshold (0.001)
     valid = mask.astype(bool) & (depth >= 0.001)
+    
+    # If no valid depth points are found, return a zero vector
     if not valid.any():
         logging.info(f"valid is empty")
         return np.zeros((3))
 
-    # Compute the median depth value in the valid mask
+    # Compute the median depth value from the valid pixels (to avoid noisy depth values)
     zc = np.median(depth[valid])
     
-    # Print the current values for debugging purposes
-    #print(f"[DEBUG] uc: {uc}, vc: {vc}, zc: {zc}")
-    #print(f"[DEBUG] K matrix: {K}, shape: {K.shape}")
-    
-    # Ensure K is a valid 3x3 matrix
+    # Optionally print debugging information (uncomment the prints to enable)
+    #print(f"[DEBUG] uc: {uc}, vc: {vc}, zc: {zc}")  # Prints the center pixel and depth
+    #print(f"[DEBUG] K matrix: {K}, shape: {K.shape}")  # Prints the camera intrinsic matrix
+
+    # Check if K is a valid 3x3 matrix. If not, raise an error.
     if K.ndim != 2 or K.shape != (3, 3):
         raise ValueError(f"Invalid K matrix. Expected 2D (3x3), got {K.shape}")
     
-    # Compute the center
+    # Use the inverse of the camera intrinsic matrix K to map the pixel coordinates (uc, vc) into 3D space
+    # Multiply by zc (the median depth) to get the final 3D position (translation).
     center = (np.linalg.inv(K) @ np.asarray([uc, vc, 1]).reshape(3, 1)) * zc
 
-    # Optionally save the point cloud for debugging
+    # Optionally save the 3D point cloud for debugging (if debug level is high)
     if self.debug >= 2:
-        pcd = toOpen3dCloud(center.reshape(1, 3))
-        o3d.io.write_point_cloud(f'{self.debug_dir}/init_center.ply', pcd)
+        pcd = toOpen3dCloud(center.reshape(1, 3))  # Convert the center point into a point cloud
+        o3d.io.write_point_cloud(f'{self.debug_dir}/init_center.ply', pcd)  # Save the point cloud to a file
     
+    # Return the 3D center as a flattened array
     return center.reshape(3)
+
 
 
 
@@ -335,7 +387,7 @@ class FoundationPose:
     # Generate random pose hypotheses for the object.
     poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
     poses = poses.data.cpu().numpy()  # Convert pose hypotheses to numpy.
-
+    ###############################################################################################
     # Estimate the object center and update the translation part of the poses.
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
     poses = torch.as_tensor(poses, device='cuda', dtype=torch.float)
