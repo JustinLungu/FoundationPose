@@ -253,92 +253,160 @@ class FoundationPose:
 
 
   def register(self, K, rgb, depth, ob_mask, ob_id=None, glctx=None, iteration=5):
-    '''Copmute pose from given pts to self.pcd
-    @pts: (N,3) np array, downsampled scene points
-    '''
-    set_seed(0)
+    """
+    Estimate the 6D pose of an object in a scene using RGB and depth data.
+    
+    This function performs the following steps:
+    - Pre-processes the depth data with erosion and bilateral filtering.
+    - Converts object masks from RGB to grayscale if necessary.
+    - Estimates an initial guess for the object's translation.
+    - Generates random pose hypotheses for the object.
+    - Refines the pose using a mesh-based refiner model.
+    - Scores the refined poses and selects the best one.
+
+    Parameters:
+    - K (numpy array): Camera intrinsic matrix (3x3).
+    - rgb (numpy array): RGB image of the scene.
+    - depth (numpy array): Depth image corresponding to the RGB image.
+    - ob_mask (numpy array): Object mask, indicating the pixels that belong to the object.
+    - ob_id (int, optional): Object ID (default is None).
+    - glctx (optional): Rendering context for rasterization (default is None).
+    - iteration (int, optional): Number of iterations for the refiner (default is 5).
+
+    Returns:
+    - best_pose (numpy array): The best estimated 4x4 pose matrix of the object in the scene.
+    """
+    set_seed(0)  # Set a random seed for reproducibility.
     logging.info('Welcome')
 
+    # If a rendering context hasn't been created, create a new one using CUDA.
     if self.glctx is None:
-      if glctx is None:
-        self.glctx = dr.RasterizeCudaContext()
-        # self.glctx = dr.RasterizeGLContext()
-      else:
-        self.glctx = glctx
+        if glctx is None:
+            self.glctx = dr.RasterizeCudaContext()  # Create CUDA rasterization context.
+        else:
+            self.glctx = glctx
 
+    # Preprocess the depth image: apply erosion and bilateral filtering to smooth it.
     depth = erode_depth(depth, radius=2, device='cuda')
     depth = bilateral_filter_depth(depth, radius=2, device='cuda')
 
-    if self.debug>=2:
-      xyz_map = depth2xyzmap(depth, K)
-      valid = xyz_map[...,2]>=0.001
-      pcd = toOpen3dCloud(xyz_map[valid], rgb[valid])
-      o3d.io.write_point_cloud(f'{self.debug_dir}/scene_raw.ply',pcd)
-      cv2.imwrite(f'{self.debug_dir}/ob_mask.png', (ob_mask*255.0).clip(0,255))
+    # If debugging is enabled, visualize the scene.
+    if self.debug >= 2:
+        #Converts the depth image into a 3D point cloud (XYZ map) based on the camera's intrinsic parameters.
+        xyz_map = depth2xyzmap(depth, K)
+        #Filters out invalid points and creates a point cloud of valid 3D points.
+        valid = xyz_map[..., 2] >= 0.001
+        pcd = toOpen3dCloud(xyz_map[valid], rgb[valid])  # Convert valid points to a point cloud.
+        #Saves the 3D point cloud to a .ply file for further analysis or visualization.
+        o3d.io.write_point_cloud(f'{self.debug_dir}/scene_raw.ply', pcd)
+        #Saves the object mask as a grayscale image
+        cv2.imwrite(f'{self.debug_dir}/ob_mask.png', (ob_mask * 255.0).clip(0, 255))
 
+    # Convert object mask from RGB to grayscale if necessary.
     if ob_mask.ndim == 3:
-      #print("[DEBUG] Converting ob_mask from RGB to grayscale")
-      ob_mask = ob_mask[:, :, 0]  # Assuming the mask is binary and any one channel (like red) will suffice
+        ob_mask = ob_mask[:, :, 0]  # Convert to grayscale by taking the first channel.
 
+    normal_map = None  # Initialize the normal map (optional, not used here).
 
-    normal_map = None
-    valid = (depth>=0.001) & (ob_mask>0)
-    if valid.sum()<4:
-      logging.info(f'valid too small, return')
-      pose = np.eye(4)
-      pose[:3,3] = self.guess_translation(depth=depth, mask=ob_mask, K=K)
-      return pose
+    # Create a mask for valid points (where the object mask is non-zero and depth is positive).
+    valid = (depth >= 0.001) & (ob_mask > 0)
+    
+    # If there are too few valid points, return an identity pose with a guessed translation.
+    if valid.sum() < 4:
+        logging.info('Valid points too small, return')
+        pose = np.eye(4)  # Identity matrix for the pose.
+        pose[:3, 3] = self.guess_translation(depth=depth, mask=ob_mask, K=K)  # Guess translation from depth.
+        return pose
 
-    if self.debug>=2:
-      imageio.imwrite(f'{self.debug_dir}/color.png', rgb)
-      cv2.imwrite(f'{self.debug_dir}/depth.png', (depth*1000).astype(np.uint16))
-      valid = xyz_map[...,2]>=0.001
-      pcd = toOpen3dCloud(xyz_map[valid], rgb[valid])
-      o3d.io.write_point_cloud(f'{self.debug_dir}/scene_complete.ply',pcd)
+    # Additional visualization for debugging.
+    if self.debug >= 2:
+        imageio.imwrite(f'{self.debug_dir}/color.png', rgb)
+        cv2.imwrite(f'{self.debug_dir}/depth.png', (depth * 1000).astype(np.uint16))
+        valid = xyz_map[..., 2] >= 0.001
+        pcd = toOpen3dCloud(xyz_map[valid], rgb[valid])
+        o3d.io.write_point_cloud(f'{self.debug_dir}/scene_complete.ply', pcd)
 
+    # Set the image dimensions and camera intrinsics.
     self.H, self.W = depth.shape[:2]
     self.K = K
     self.ob_id = ob_id
     self.ob_mask = ob_mask
 
+    # Generate random pose hypotheses for the object.
     poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
-    poses = poses.data.cpu().numpy()
-    logging.info(f'poses:{poses.shape}')
+    poses = poses.data.cpu().numpy()  # Convert pose hypotheses to numpy.
+
+    # Estimate the object center and update the translation part of the poses.
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
-
     poses = torch.as_tensor(poses, device='cuda', dtype=torch.float)
-    poses[:,:3,3] = torch.as_tensor(center.reshape(1,3), device='cuda')
+    poses[:, :3, 3] = torch.as_tensor(center.reshape(1, 3), device='cuda')
 
+    # Compute the initial pose error with respect to the ground truth.
     add_errs = self.compute_add_err_to_gt_pose(poses)
-    logging.info(f"after viewpoint, add_errs min:{add_errs.min()}")
+    logging.info(f"After viewpoint generation, add_errs min: {add_errs.min()}")
 
+    # Convert depth to an XYZ map.
     xyz_map = depth2xyzmap(depth, K)
-    poses, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, xyz_map=xyz_map, glctx=self.glctx, mesh_diameter=self.diameter, iteration=iteration, get_vis=self.debug>=2)
-    if vis is not None:
-      imageio.imwrite(f'{self.debug_dir}/vis_refiner.png', vis)
 
-    scores, vis = self.scorer.predict(mesh=self.mesh, rgb=rgb, depth=depth, K=K, ob_in_cams=poses.data.cpu().numpy(), normal_map=normal_map, mesh_tensors=self.mesh_tensors, glctx=self.glctx, mesh_diameter=self.diameter, get_vis=self.debug>=2)
-    if vis is not None:
-      imageio.imwrite(f'{self.debug_dir}/vis_score.png', vis)
+    # Refine the pose using the refiner model.
+    poses, vis = self.refiner.predict(
+        mesh=self.mesh,
+        mesh_tensors=self.mesh_tensors,
+        rgb=rgb,
+        depth=depth,
+        K=K,
+        ob_in_cams=poses.data.cpu().numpy(),
+        normal_map=normal_map,
+        xyz_map=xyz_map,
+        glctx=self.glctx,
+        mesh_diameter=self.diameter,
+        iteration=iteration,
+        get_vis=self.debug >= 2
+    )
 
+    # If visualization is returned by the refiner, save it.
+    if vis is not None:
+        imageio.imwrite(f'{self.debug_dir}/vis_refiner.png', vis)
+
+    # Score the refined poses using the scorer model.
+    scores, vis = self.scorer.predict(
+        mesh=self.mesh,
+        rgb=rgb,
+        depth=depth,
+        K=K,
+        ob_in_cams=poses.data.cpu().numpy(),
+        normal_map=normal_map,
+        mesh_tensors=self.mesh_tensors,
+        glctx=self.glctx,
+        mesh_diameter=self.diameter,
+        get_vis=self.debug >= 2
+    )
+
+    # If visualization is returned by the scorer, save it.
+    if vis is not None:
+        imageio.imwrite(f'{self.debug_dir}/vis_score.png', vis)
+
+    # Compute the final pose error after refinement.
     add_errs = self.compute_add_err_to_gt_pose(poses)
-    logging.info(f"final, add_errs min:{add_errs.min()}")
+    logging.info(f"Final pose estimation, add_errs min: {add_errs.min()}")
 
+    # Sort the poses based on their scores.
     ids = torch.as_tensor(scores).argsort(descending=True)
-    logging.info(f'sort ids:{ids}')
+    logging.info(f'Sorted pose IDs: {ids}')
     scores = scores[ids]
     poses = poses[ids]
+    logging.info(f'Sorted scores: {scores}')
 
-    logging.info(f'sorted scores:{scores}')
-
-    best_pose = poses[0]@self.get_tf_to_centered_mesh()
+    # Select the best pose (the highest-scoring one).
+    best_pose = poses[0] @ self.get_tf_to_centered_mesh()
     self.pose_last = poses[0]
     self.best_id = ids[0]
-
     self.poses = poses
     self.scores = scores
 
+    # Return the best pose as a numpy array.
     return best_pose.data.cpu().numpy()
+
 
 
   def compute_add_err_to_gt_pose(self, poses):
@@ -349,23 +417,69 @@ class FoundationPose:
 
 
   def track_one(self, rgb, depth, K, iteration, extra={}):
+    """
+    Track the object in the scene based on the previous pose (`pose_last`) and update the pose for the current frame.
+    
+    This function refines the previously estimated pose using the RGB and depth information from the current frame.
+    The `refiner` model is used to predict the pose for the current frame based on the last known pose.
+    
+    Parameters:
+    - rgb (numpy array): RGB image of the scene.
+    - depth (numpy array): Depth image corresponding to the RGB image.
+    - K (numpy array): Camera intrinsic matrix (3x3).
+    - iteration (int): Number of iterations for pose refinement.
+    - extra (dict, optional): Extra outputs for debugging or visualization.
+    
+    Returns:
+    - pose (numpy array): The updated 4x4 pose matrix of the object in the scene.
+    
+    Raises:
+    - RuntimeError: If `pose_last` is not initialized (i.e., no previous pose has been estimated).
+    """
+    # If the last pose is not available, raise an error.
     if self.pose_last is None:
-      logging.info("Please init pose by register first")
-      raise RuntimeError
+        logging.info("Please init pose by register first")
+        raise RuntimeError
+
     logging.info("Welcome")
 
+    # Convert the depth map to a PyTorch tensor and move it to the GPU (cuda).
     depth = torch.as_tensor(depth, device='cuda', dtype=torch.float)
+
+    # Preprocess the depth image: apply erosion and bilateral filtering to smooth it.
     depth = erode_depth(depth, radius=2, device='cuda')
     depth = bilateral_filter_depth(depth, radius=2, device='cuda')
-    logging.info("depth processing done")
+    logging.info("Depth processing done")
 
+    # Convert the depth map to an XYZ map (3D coordinates for each pixel) using camera intrinsics.
     xyz_map = depth2xyzmap_batch(depth[None], torch.as_tensor(K, dtype=torch.float, device='cuda')[None], zfar=np.inf)[0]
 
-    pose, vis = self.refiner.predict(mesh=self.mesh, mesh_tensors=self.mesh_tensors, rgb=rgb, depth=depth, K=K, ob_in_cams=self.pose_last.reshape(1,4,4).data.cpu().numpy(), normal_map=None, xyz_map=xyz_map, mesh_diameter=self.diameter, glctx=self.glctx, iteration=iteration, get_vis=self.debug>=2)
-    logging.info("pose done")
-    if self.debug>=2:
-      extra['vis'] = vis
-    self.pose_last = pose
-    return (pose@self.get_tf_to_centered_mesh()).data.cpu().numpy().reshape(4,4)
+    # Use the `refiner` model to refine the pose for the current frame based on the last known pose (`pose_last`).
+    # The pose is predicted using the mesh, RGB image, depth map, XYZ map, and camera intrinsics.
+    pose, vis = self.refiner.predict(
+        mesh=self.mesh,
+        mesh_tensors=self.mesh_tensors,
+        rgb=rgb,
+        depth=depth,
+        K=K,
+        ob_in_cams=self.pose_last.reshape(1, 4, 4).data.cpu().numpy(),  # Last known pose
+        normal_map=None,
+        xyz_map=xyz_map,
+        mesh_diameter=self.diameter,
+        glctx=self.glctx,
+        iteration=iteration,
+        get_vis=self.debug >= 2
+    )
 
+    logging.info("Pose prediction done")
+
+    # If debugging is enabled, store the visualization results in the `extra` dictionary.
+    if self.debug >= 2:
+        extra['vis'] = vis
+
+    # Update `pose_last` with the new pose for the current frame.
+    self.pose_last = pose
+
+    # Return the updated pose after applying the transformation to the centered mesh.
+    return (pose @ self.get_tf_to_centered_mesh()).data.cpu().numpy().reshape(4, 4)
 

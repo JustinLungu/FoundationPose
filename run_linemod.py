@@ -194,6 +194,7 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
 
         
         # Perform pose estimation using the FoundationPose model's `register` function
+        # register = "do inference"
         pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
         logging.info(f"pose:\n{pose}")
 
@@ -207,9 +208,10 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         # Store the estimated pose in the result dictionary for this frame and object
         result[video_id][id_str][ob_id] = pose
 
+        break
+
     # Return the result dictionary, which contains the pose estimates for each frame and object
     return result
-    
 
 
 def run_pose_estimation():
@@ -297,7 +299,7 @@ def run_pose_estimation():
     out = run_pose_estimation_worker(reader, frame_batch, est, debug, ob_id, "cuda:0")
     outs.append(out)
 
-  """
+  
   #organizing the pose estimation results in a nested disctionary structure
   for out in outs:
       for video_id in out:
@@ -308,7 +310,6 @@ def run_pose_estimation():
   # Save the results to a YAML file in the debug directory.
   with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
       yaml.safe_dump(make_yaml_dumpable(res), ff)
-  """
 
 
 
@@ -332,7 +333,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_reconstructed_mesh', type=int, default=0, help="Use reconstructed mesh or ground truth")
     # directory containing reference views for mesh reconstruction (default path provided).
     parser.add_argument('--ref_view_dir', type=str, default="/Linemod_preprocessed/ref_views")
-    parser.add_argument('--debug', type=int, default=0, help="Debug level")
+    parser.add_argument('--debug', type=int, default=4, help="Debug level")
     parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug', help="Directory to save debug info")
 
 
