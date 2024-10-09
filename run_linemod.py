@@ -38,6 +38,8 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/mycpp/build')
 import yaml
 
+import cv2
+import numpy as np
 
 
 def get_mask(reader, i_frame, ob_id, detect_type):
@@ -135,8 +137,6 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
     # Store the directory for debugging (where files may be saved)
     debug_dir = est.debug_dir
 
-    print(len(i_frames))
-
     # Loop over each frame index in the i_frames list
     for i, i_frame in enumerate(i_frames):
         logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
@@ -144,8 +144,23 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         # Get the video ID, color image, and depth image for the current frame
         video_id = reader.get_video_id()
         color = reader.get_color(i_frame)
+        #pixel = 0 means no valid depth information
+        #pixel = 0.638 means that the pixels are at depth 0.638 meters
         depth = reader.get_depth(i_frame)
-        
+
+        #show coloured image
+        #cv2.imshow("Color Image", color)
+        #cv2.waitKey(0)
+        #cv2.destroyAllWindows()
+
+        #show the depth image
+        # # Normalize the depth image to fit the 0-255 range for display
+        # depth_display = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
+        # depth_display = depth_display.astype(np.uint8)
+        # cv2.imshow("Depth Image", depth_display)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+
         # Get the string ID for the current frame (might be frame number as a string)
         id_str = reader.id_strs[i_frame]
         
@@ -155,6 +170,7 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         # Limit processing to object ID 1 (or another desired object ID)
         if ob_id != 1:
             continue  # Skip other objects if it's not the desired object
+        
 
         # Extract the camera intrinsic matrix (K matrix) for the current frame as a NumPy array
         frame_key = str(i_frame).zfill(6)  # Zero-pad the frame number to match dictionary keys
@@ -172,10 +188,11 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
             logging.info("ob_mask not found, skip")
             result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if the mask is not found
             continue
-
+        
         # Retrieve the ground truth pose for the object in the current frame (if available)
         est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
 
+        
         # Perform pose estimation using the FoundationPose model's `register` function
         pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
         logging.info(f"pose:\n{pose}")
@@ -192,6 +209,7 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
 
     # Return the result dictionary, which contains the pose estimates for each frame and object
     return result
+    
 
 
 def run_pose_estimation():
@@ -264,9 +282,7 @@ def run_pose_estimation():
     # Get the symmetry transformations (if any) for the current object.
     #for us is just a 4x4 identity matrix
     symmetry_tfs = reader_tmp.symmetry_tfs[ob_id]
-
     
-
     # Set up the directory for the object’s dataset (color, depth, mask files, etc.).
     video_dir = f'Linemod_preprocessed/data/{ob_id:02d}'
     reader = LinemodReader(video_dir, split=None)  # Initialize the reader for this specific object.
@@ -281,6 +297,7 @@ def run_pose_estimation():
     out = run_pose_estimation_worker(reader, frame_batch, est, debug, ob_id, "cuda:0")
     outs.append(out)
 
+  """
   #organizing the pose estimation results in a nested disctionary structure
   for out in outs:
       for video_id in out:
@@ -291,7 +308,7 @@ def run_pose_estimation():
   # Save the results to a YAML file in the debug directory.
   with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
       yaml.safe_dump(make_yaml_dumpable(res), ff)
-
+  """
 
 
 

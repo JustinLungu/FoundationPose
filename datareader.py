@@ -106,6 +106,20 @@ class YcbineoatReader:
 
 
   def get_color(self,i):
+    """
+    Reads and processes the color image at the specified index.
+
+    This function performs the following steps:
+    - Reads the color image from the file at the given index 'i' in the 'self.color_files' list.
+    - The image is read using the 'imageio' library, and the last channel is removed to ensure it returns a 3-channel RGB image.
+    - Resizes the image to the target width (self.W) and height (self.H) using OpenCV's nearest-neighbor interpolation.
+
+    Args:
+        i (int): The index of the color image in the 'self.color_files' list to read.
+
+    Returns:
+        numpy.ndarray: The processed RGB color image.
+    """
     color = imageio.imread(self.color_files[i])[...,:3]
     color = cv2.resize(color, (self.W,self.H), interpolation=cv2.INTER_NEAREST)
     return color
@@ -244,21 +258,52 @@ class BopBaseReader:
 
 
   def get_color(self, i):
-    color = imageio.imread(self.color_files[i])
+    """
+    Reads and processes the color image at the specified index.
+
+    This function performs the following steps:
+    - Reads the color image from the file at index 'i' using the 'imageio' library.
+    - If the image is grayscale (2D), it converts it to a 3-channel RGB image by replicating the grayscale values across the three channels.
+    - If resizing is enabled (i.e., `self.resize` is not 1), it resizes the color image using OpenCV.
+
+    Args:
+        i (int): The index of the color image in the 'self.color_files' list to read.
+
+    Returns:
+        numpy.ndarray: The processed color image in RGB format.
+    """
+    color = imageio.imread(self.color_files[i])  # Read the image
     if len(color.shape) == 2:
-        color = np.tile(color[..., None], (1, 1, 3))  # Convert grayscale to RGB
+        color = np.tile(color[..., None], (1, 1, 3))  # Convert grayscale to RGB by replicating the grayscale values
     if self.resize != 1:
-        color = cv2.resize(color, dsize=None, fx=self.resize, fy=self.resize)
+        color = cv2.resize(color, dsize=None, fx=self.resize, fy=self.resize)  # Resize the color image if needed
     return color
 
 
+
   def get_depth(self, i):
-    depth_file = self.color_files[i].replace('rgb', 'depth').replace('gray', 'depth')
-    depth = cv2.imread(depth_file, -1) * 1e-3 * self.bop_depth_scale
+    """
+    Reads and processes the depth image corresponding to the color image at index 'i'.
+
+    This function performs the following steps:
+    - Replaces the 'rgb' or 'gray' part of the color image filename with 'depth' to find the corresponding depth image file.
+    - Reads the depth image using OpenCV's `cv2.imread` function.
+    - The depth values are converted from millimeters to meters by multiplying by 1e-3 and a dataset-specific scaling factor (`self.bop_depth_scale`).
+    - If resizing is enabled (i.e., `self.resize` is not 1), it resizes the depth image using nearest-neighbor interpolation.
+    - Depth values that are too small (<0.001 meters) or too large (beyond the defined far plane `self.zfar`) are set to zero.
+
+    Args:
+        i (int): The index of the depth image corresponding to the color image.
+
+    Returns:
+        numpy.ndarray: The processed depth image in meters.
+    """
+    depth_file = self.color_files[i].replace('rgb', 'depth').replace('gray', 'depth')  # Get the depth image filename
+    depth = cv2.imread(depth_file, -1) * 1e-3 * self.bop_depth_scale  # Read the depth image and scale it to meters
     if self.resize != 1:
-        depth = cv2.resize(depth, dsize=None, fx=self.resize, fy=self.resize, interpolation=cv2.INTER_NEAREST)
-    depth[depth < 0.001] = 0
-    depth[depth > self.zfar] = 0
+        depth = cv2.resize(depth, dsize=None, fx=self.resize, fy=self.resize, interpolation=cv2.INTER_NEAREST)  # Resize if needed
+    depth[depth < 0.001] = 0  # Set very small depth values to zero
+    depth[depth > self.zfar] = 0  # Set very large depth values (beyond the far plane) to zero
     return depth
 
   def get_xyz_map(self,i):
@@ -344,6 +389,7 @@ class BopBaseReader:
 
 
   def get_gt_pose(self, i_frame:int, ob_id, mask=None, use_my_correction=False):
+    print("THIS ONE IN BOP BASE")
     ob_in_cam = np.eye(4)
     best_iou = -np.inf
     best_gt_mask = None
@@ -428,6 +474,18 @@ class BopBaseReader:
 
   
   def get_video_id(self):
+    """
+    Extracts and returns the video or object ID from the directory path (self.base_dir).
+
+    This function splits the base directory path by '/', takes the last part (which represents
+    the ID), and converts it into an integer.
+
+    Example:
+        If self.base_dir is 'Linemod_preprocessed/data/01', the function will return 1.
+
+    Returns:
+        int: The video or object ID as an integer.
+    """
     return int(self.base_dir.split('/')[-1])
 
 
@@ -496,6 +554,7 @@ class LinemodReader(LinemodOcclusionReader):
     """
     Fetches the ground truth pose for a given frame and object ID.
     """
+    print("THIS ONE IN LINEMODE")
     # Debugging: print frame and object id info
     #print(f"[DEBUG] Accessing ground truth pose for frame {i_frame}, object ID {ob_id}")
     

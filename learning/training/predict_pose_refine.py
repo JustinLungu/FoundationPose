@@ -99,8 +99,6 @@ class PoseRefinePredictor:
     code_dir = os.path.dirname(os.path.realpath(__file__))
     ckpt_dir = f'{code_dir}/../../weights/{self.run_name}/{model_name}'
 
-    print("RUN NAMEEEEEEEE ", self.run_name)
-
     self.cfg = OmegaConf.load(f'{code_dir}/../../weights/{self.run_name}/config.yml')
 
     self.cfg['ckpt_dir'] = ckpt_dir
