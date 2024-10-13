@@ -419,26 +419,6 @@ class FoundationPose:
     poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
     poses = poses.data.cpu().numpy()  # Convert pose hypotheses to numpy.
 
-    aux = poses
-
-    # Estimate the object center and update the translation part of the poses.
-    center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
-    poses = torch.as_tensor(poses, device='cuda', dtype=torch.float)
-    poses[:, :3, 3] = torch.as_tensor(center.reshape(1, 3), device='cuda')
-
-    # Print the first element from both aux (numpy) and poses (PyTorch tensor)
-    print("First element from aux:")
-    print(aux[0])
-
-    print("First element from poses (converted back to numpy):")
-    print(poses[0].data.cpu().numpy())
-
-    poses = poses.data.cpu().numpy()
-
-    # Call the comparison function to check all matrices
-    self.compare_matrices(aux, poses)
-    """
-
     # Compute the initial pose error with respect to the ground truth.
     add_errs = self.compute_add_err_to_gt_pose(poses)
     logging.info(f"After viewpoint generation, add_errs min: {add_errs.min()}")
@@ -453,7 +433,7 @@ class FoundationPose:
         rgb=rgb,
         depth=depth,
         K=K,
-        ob_in_cams=poses.data.cpu().numpy(),
+        ob_in_cams=poses, #.data.cpu().numpy(),
         normal_map=normal_map,
         xyz_map=xyz_map,
         glctx=self.glctx,
@@ -504,7 +484,6 @@ class FoundationPose:
 
     # Return the best pose as a numpy array.
     return best_pose.data.cpu().numpy()
-    """
 
 
   def compute_add_err_to_gt_pose(self, poses):
