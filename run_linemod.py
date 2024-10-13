@@ -148,18 +148,19 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         #pixel = 0.638 means that the pixels are at depth 0.638 meters
         depth = reader.get_depth(i_frame)
 
-        #show coloured image
-        #cv2.imshow("Color Image", color)
-        #cv2.waitKey(0)
-        #cv2.destroyAllWindows()
+        if debug >= 5:
+          #show coloured image
+          cv2.imshow("Color Image", color)
+          cv2.waitKey(0)
+          cv2.destroyAllWindows()
 
-        #show the depth image
-        # # Normalize the depth image to fit the 0-255 range for display
-        # depth_display = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
-        # depth_display = depth_display.astype(np.uint8)
-        # cv2.imshow("Depth Image", depth_display)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+          #show the depth image
+          # Normalize the depth image to fit the 0-255 range for display
+          depth_display = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
+          depth_display = depth_display.astype(np.uint8)
+          cv2.imshow("Depth Image", depth_display)
+          cv2.waitKey(0)
+          cv2.destroyAllWindows()
 
         # Get the string ID for the current frame (might be frame number as a string)
         id_str = reader.id_strs[i_frame]
@@ -196,7 +197,8 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         # Perform pose estimation using the FoundationPose model's `register` function
         # register = "do inference"
         pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
-        logging.info(f"pose:\n{pose}")
+        if debug >= 2:
+          logging.info(f"pose:\n{pose}")
 
         # If debugging level is high (>= 3), save a transformed version of the object mesh
         if debug >= 3:
@@ -333,7 +335,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_reconstructed_mesh', type=int, default=0, help="Use reconstructed mesh or ground truth")
     # directory containing reference views for mesh reconstruction (default path provided).
     parser.add_argument('--ref_view_dir', type=str, default="/Linemod_preprocessed/ref_views")
-    parser.add_argument('--debug', type=int, default=4, help="Debug level")
+    parser.add_argument('--debug', type=int, default=0, help="Debug level")
     parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug', help="Directory to save debug info")
 
 

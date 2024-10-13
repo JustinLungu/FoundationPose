@@ -475,6 +475,24 @@ if wp is not None:
 
 
 def depth2xyzmap(depth, K, uvs=None):
+  """
+  Convert a depth map to a 3D point cloud (XYZ map) in camera space using the camera's intrinsic matrix.
+
+  Parameters:
+  -----------
+  depth : np.ndarray
+      A 2D array (H, W) representing the depth map. Each value corresponds to the distance from the camera to the object.
+  K : np.ndarray
+      The camera intrinsic matrix (3x3), used to map pixel coordinates to camera space.
+  uvs : np.ndarray, optional
+      A set of 2D pixel coordinates (u, v) for which to compute the 3D points. If not provided, the function computes for all pixels.
+
+  Returns:
+  --------
+  xyz_map : np.ndarray
+      A 3D array (H, W, 3) where each element contains the XYZ coordinates of the corresponding pixel in the depth map.
+      Invalid depth values are set to (0, 0, 0).
+  """
   invalid_mask = (depth<0.001)
   H,W = depth.shape[:2]
   if uvs is None:
