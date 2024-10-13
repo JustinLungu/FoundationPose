@@ -303,6 +303,37 @@ class FoundationPose:
 
 
 
+  def compare_matrices(self, aux, poses_np, tolerance=1e-6):
+    """
+    Compare two sets of 4x4 pose matrices (numpy and torch) element-wise.
+
+    Parameters:
+    aux (numpy.ndarray): The first set of matrices.
+    poses (torch.Tensor): The second set of matrices (torch, which will be converted to numpy).
+    tolerance (float): The acceptable tolerance for comparing floating point numbers.
+
+    Returns:
+    None: Prints differences if found or confirmation that the matrices are identical.
+    """
+
+    if aux.shape != poses_np.shape:
+        print(f"Shape mismatch: aux shape = {aux.shape}, poses shape = {poses_np.shape}")
+        return
+
+    # Iterate through all matrices and compare each one
+    for i in range(len(aux)):
+        aux_matrix = aux[i]
+        poses_matrix = poses_np[i]
+
+        if not np.allclose(aux_matrix, poses_matrix, atol=tolerance):
+            print(f"Difference detected at index {i}:")
+            print(f"Matrix 1 (aux):\n{aux_matrix}")
+            print(f"Matrix 2 (poses):\n{poses_matrix}")
+            differences = aux_matrix - poses_matrix
+            print(f"Differences:\n{differences}")
+        else:
+            print(f"Matrices at index {i} are identical within the tolerance.")
+
 
   def register(self, K, rgb, depth, ob_mask, ob_id=None, glctx=None, iteration=5):
     """
@@ -387,11 +418,26 @@ class FoundationPose:
     # Generate random pose hypotheses for the object.
     poses = self.generate_random_pose_hypo(K=K, rgb=rgb, depth=depth, mask=ob_mask, scene_pts=None)
     poses = poses.data.cpu().numpy()  # Convert pose hypotheses to numpy.
-    ###############################################################################################
+
+    aux = poses
+
     # Estimate the object center and update the translation part of the poses.
     center = self.guess_translation(depth=depth, mask=ob_mask, K=K)
     poses = torch.as_tensor(poses, device='cuda', dtype=torch.float)
     poses[:, :3, 3] = torch.as_tensor(center.reshape(1, 3), device='cuda')
+
+    # Print the first element from both aux (numpy) and poses (PyTorch tensor)
+    print("First element from aux:")
+    print(aux[0])
+
+    print("First element from poses (converted back to numpy):")
+    print(poses[0].data.cpu().numpy())
+
+    poses = poses.data.cpu().numpy()
+
+    # Call the comparison function to check all matrices
+    self.compare_matrices(aux, poses)
+    """
 
     # Compute the initial pose error with respect to the ground truth.
     add_errs = self.compute_add_err_to_gt_pose(poses)
@@ -458,7 +504,7 @@ class FoundationPose:
 
     # Return the best pose as a numpy array.
     return best_pose.data.cpu().numpy()
-
+    """
 
 
   def compute_add_err_to_gt_pose(self, poses):
