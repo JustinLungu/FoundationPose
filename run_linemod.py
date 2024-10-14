@@ -149,10 +149,9 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         depth = reader.get_depth(i_frame)
 
         if debug >= 5:
-          #show coloured image
-          cv2.imshow("Color Image", color)
-          cv2.waitKey(0)
-          cv2.destroyAllWindows()
+          #show coloured image (convert RGB to BGR)
+          color_bgr = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
+          cv2.imshow("Color Image2", color_bgr)
 
           #show the depth image
           # Normalize the depth image to fit the 0-255 range for display
@@ -335,7 +334,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_reconstructed_mesh', type=int, default=0, help="Use reconstructed mesh or ground truth")
     # directory containing reference views for mesh reconstruction (default path provided).
     parser.add_argument('--ref_view_dir', type=str, default="/Linemod_preprocessed/ref_views")
-    parser.add_argument('--debug', type=int, default=0, help="Debug level")
+    parser.add_argument('--debug', type=int, default=5, help="Debug level")
     parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug', help="Directory to save debug info")
 
 
