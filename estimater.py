@@ -423,7 +423,7 @@ class FoundationPose:
     add_errs = self.compute_add_err_to_gt_pose(poses)
     logging.info(f"After viewpoint generation, add_errs min: {add_errs.min()}")
     
-    # Convert depth to an XYZ map.
+    #Convert a depth map to a 3D point cloud (XYZ map) in camera space
     xyz_map = depth2xyzmap(depth, K)
 
     
@@ -446,14 +446,14 @@ class FoundationPose:
     # If visualization is returned by the refiner, save it.
     if vis is not None:
         imageio.imwrite(f'{self.debug_dir}/vis_refiner.png', vis)
-
+    
     # Score the refined poses using the scorer model.
     scores, vis = self.scorer.predict(
         mesh=self.mesh,
         rgb=rgb,
         depth=depth,
         K=K,
-        ob_in_cams=poses.data.cpu().numpy(),
+        ob_in_cams=poses, #.data.cpu().numpy(),
         normal_map=normal_map,
         mesh_tensors=self.mesh_tensors,
         glctx=self.glctx,
@@ -470,6 +470,8 @@ class FoundationPose:
     logging.info(f"Final pose estimation, add_errs min: {add_errs.min()}")
 
     # Sort the poses based on their scores.
+    #ids = torch.as_tensor(scores).cpu().argsort(descending=True)
+    #scores = scores[ids].cpu()
     ids = torch.as_tensor(scores).argsort(descending=True)
     scores = scores[ids]
     poses = poses[ids]
@@ -478,6 +480,7 @@ class FoundationPose:
         logging.info(f'Sorted scores: {scores}')
     
     # Select the best pose (the highest-scoring one).
+    #best_pose = poses[0] @ self.get_tf_to_centered_mesh().cpu().numpy()
     best_pose = poses[0] @ self.get_tf_to_centered_mesh()
     self.pose_last = poses[0]
     self.best_id = ids[0]
@@ -485,8 +488,8 @@ class FoundationPose:
     self.scores = scores
 
     # Return the best pose as a numpy array.
+    #return best_pose
     return best_pose.data.cpu().numpy()
-  
 
 
   def compute_add_err_to_gt_pose(self, poses):

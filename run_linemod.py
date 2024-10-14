@@ -195,6 +195,8 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
         
         # Perform pose estimation using the FoundationPose model's `register` function
         # register = "do inference"
+        print(K_matrix)
+        break
         pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
         if debug >= 2:
           logging.info(f"pose:\n{pose}")
