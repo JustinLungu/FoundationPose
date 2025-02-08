@@ -65,6 +65,7 @@ coverage.xml
 *.cover
 demo_data/
 debug/
+debug/ob_in_camera/
 weights/
 *.py,cover
 .hypothesis/

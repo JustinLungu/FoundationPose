@@ -1,21 +1,16 @@
 #!/bin/bash
 
-# remove any existing container "foundationpose"
+# Remove any existing container "foundationpose"
 docker rm -f foundationpose
 
-'''
-Example
-realpath $0 --> returns /home/justin/my_project/docker/run_docker.sh
-dirname $(realpath $0) --> /home/justin/my_project/docker
-etc.
-'''
-echo "Project directory: $(dirname $(dirname $(realpath $0)))"
-# set the project directory (assumed to be the parent of the 'docker' directory)
-PROJECT_DIR=$(dirname $(dirname $(realpath $0)))
+# Hardcode the project directory
+PROJECT_DIR="/home/justin/thesis/FoundationPose"
+echo "Project directory: $PROJECT_DIR"
 
+# Enable GUI access for the container
+xhost +local:docker
 
-# run the Docker container
-xhost +  # for container GUI
+# Run the Docker container
 docker run --gpus all \
   --env NVIDIA_DISABLE_REQUIRE=1 \
   -it \
@@ -30,6 +25,5 @@ docker run --gpus all \
   -v /tmp:/tmp \
   --ipc=host \
   -e DISPLAY=${DISPLAY} \
-  -e GIT_INDEX_FILE \
   foundationpose:latest \
   bash -c "cd /app && bash"
