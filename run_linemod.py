@@ -41,6 +41,8 @@ import yaml
 import cv2
 import numpy as np
 
+OBJECT_ID = 1
+
 
 def get_mask(reader, i_frame, ob_id, detect_type):
   """
@@ -144,7 +146,7 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
       #NOTE: remove this when you want more than just one object of the dataset
       #or change the number if you want a different object
       # Limit processing to object ID 1 (or another desired object ID)
-      if ob_id != 1:
+      if ob_id != OBJECT_ID:
           continue  # Skip other objects if it's not the desired object
       
       # Get the video ID, color image, and depth image for the current frame
@@ -272,9 +274,11 @@ def run_pose_estimation():
   # Loop through all object IDs in the dataset (ob_ids). In this example, we limit to object ID 1.
   for ob_id in reader_tmp.ob_ids:
     ob_id = int(ob_id)  # Ensure object ID is an integer.
-
+    
+    #NOTE: remove this when you want more than just one object of the dataset
+    #or change the number if you want a different object
     # Skip all objects except object ID 1 (can be modified to work with other objects).
-    if ob_id != 1:
+    if ob_id != OBJECT_ID:
       continue
 
     # Select the mesh for the object:
@@ -304,19 +308,18 @@ def run_pose_estimation():
     # Store the results of the pose estimation.
     out = run_pose_estimation_worker(reader, frame_batch, est, debug, ob_id, "cuda:0")
     outs.append(out)
-
   
 
-  # #organizing the pose estimation results in a nested disctionary structure
-  # for out in outs:
-  #     for video_id in out:
-  #         for id_str in out[video_id]:
-  #             for ob_id in out[video_id][id_str]:
-  #                 res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
+  #organizing the pose estimation results in a nested disctionary structure
+  for out in outs:
+      for video_id in out:
+          for id_str in out[video_id]:
+              for ob_id in out[video_id][id_str]:
+                  res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
   
-  # # Save the results to a YAML file in the debug directory.
-  # with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
-  #     yaml.safe_dump(make_yaml_dumpable(res), ff)
+  # Save the results to a YAML file in the debug directory.
+  with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
+      yaml.safe_dump(make_yaml_dumpable(res), ff)
 
 
 
