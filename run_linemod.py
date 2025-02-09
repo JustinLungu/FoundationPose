@@ -139,79 +139,80 @@ def run_pose_estimation_worker(reader, i_frames, est: FoundationPose = None, deb
 
     # Loop over each frame index in the i_frames list
     for i, i_frame in enumerate(i_frames):
-        logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
-        
-        # Get the video ID, color image, and depth image for the current frame
-        video_id = reader.get_video_id()
-        color = reader.get_color(i_frame)
-        #pixel = 0 means no valid depth information
-        #pixel = 0.638 means that the pixels are at depth 0.638 meters
-        depth = reader.get_depth(i_frame)
+      logging.info(f"{i}/{len(i_frames)}, i_frame:{i_frame}, ob_id:{ob_id}")
 
-        if debug >= 5:
-          #show coloured image (convert RGB to BGR)
-          color_bgr = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
-          cv2.imshow("Color Image2", color_bgr)
+      #NOTE: remove this when you want more than just one object of the dataset
+      #or change the number if you want a different object
+      # Limit processing to object ID 1 (or another desired object ID)
+      if ob_id != 1:
+          continue  # Skip other objects if it's not the desired object
+      
+      # Get the video ID, color image, and depth image for the current frame
+      video_id = reader.get_video_id()
+      color = reader.get_color(i_frame)
+      #pixel = 0 means no valid depth information
+      #pixel = 0.638 means that the pixels are at depth 0.638 meters
+      depth = reader.get_depth(i_frame)
 
-          #show the depth image
-          # Normalize the depth image to fit the 0-255 range for display
-          depth_display = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
-          depth_display = depth_display.astype(np.uint8)
-          cv2.imshow("Depth Image", depth_display)
-          cv2.waitKey(0)
-          cv2.destroyAllWindows()
+      if debug >= 5 and i_frame == 0:
+        #show coloured image (convert RGB to BGR)
+        color_bgr = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
+        cv2.imshow("Color Image2", color_bgr)
 
-        # Get the string ID for the current frame (might be frame number as a string)
-        id_str = reader.id_strs[i_frame]
-        
-        # Get the height and width of the color image
-        H, W = color.shape[:2]
+        #show the depth image
+        # Normalize the depth image to fit the 0-255 range for display
+        depth_display = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
+        depth_display = depth_display.astype(np.uint8)
+        cv2.imshow("Depth Image", depth_display)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-        # Limit processing to object ID 1 (or another desired object ID)
-        if ob_id != 1:
-            continue  # Skip other objects if it's not the desired object
-        
+      # Get the string ID for the current frame (might be frame number as a string)
+      id_str = reader.id_strs[i_frame]
+      
+      # Get the height and width of the color image
+      H, W = color.shape[:2]
 
-        # Extract the camera intrinsic matrix (K matrix) for the current frame as a NumPy array
-        frame_key = str(i_frame).zfill(6)  # Zero-pad the frame number to match dictionary keys
-        if frame_key not in reader.K:
-            logging.error(f"K matrix not found for frame {frame_key}. Skipping.")
-            result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if K matrix is not found
-            continue
-        
-        # Convert the K matrix to a NumPy array
-        K_matrix = np.array(reader.K[frame_key])
+      # Extract the camera intrinsic matrix (K matrix) for the current frame as a NumPy array
+      frame_key = str(i_frame).zfill(6)  # Zero-pad the frame number to match dictionary keys
+      if frame_key not in reader.K:
+          logging.error(f"K matrix not found for frame {frame_key}. Skipping.")
+          result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if K matrix is not found
+          continue
+      
+      # Convert the K matrix to a NumPy array
+      K_matrix = np.array(reader.K[frame_key])
 
-        # Get the object mask for the current frame and object ID using the `get_mask` function
-        ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
-        if ob_mask is None:
-            logging.info("ob_mask not found, skip")
-            result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if the mask is not found
-            continue
-        
-        # Retrieve the ground truth pose for the object in the current frame (if available)
-        est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
+      # Get the object mask for the current frame and object ID using the `get_mask` function
+      ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
+      if ob_mask is None:
+          logging.info("ob_mask not found, skip")
+          result[video_id][id_str][ob_id] = np.eye(4)  # Return an identity matrix if the mask is not found
+          continue
+      
+      # Retrieve the ground truth pose for the object in the current frame (if available)
+      est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
 
-        
-        # Perform pose estimation using the FoundationPose model's `register` function
-        # register = "do inference"
-        print(K_matrix)
-        break
-        pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
-        if debug >= 2:
-          logging.info(f"pose:\n{pose}")
+      
+      # Perform pose estimation using the FoundationPose model's `register` function
+      # register = "do inference"
+      pose = est.register(K=K_matrix, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id)
+      if debug >= 2:
+        logging.info(f"pose:\n{pose}")
 
-        # If debugging level is high (>= 3), save a transformed version of the object mesh
-        if debug >= 3:
-            m = est.mesh_ori.copy()  # Make a copy of the original mesh
-            tmp = m.copy()
-            tmp.apply_transform(pose)  # Apply the estimated transformation to the mesh
-            tmp.export(f'{debug_dir}/model_tf.obj')  # Export the transformed mesh for visualization
+      # If debugging level is high (>= 3), save a transformed version of the object mesh
+      if debug >= 3:
+          m = est.mesh_ori.copy()  # Make a copy of the original mesh
+          tmp = m.copy()
+          tmp.apply_transform(pose)  # Apply the estimated transformation to the mesh
+          tmp.export(f'{debug_dir}/model_tf.obj')  # Export the transformed mesh for visualization
 
-        # Store the estimated pose in the result dictionary for this frame and object
-        result[video_id][id_str][ob_id] = pose
+      # Store the estimated pose in the result dictionary for this frame and object
+      result[video_id][id_str][ob_id] = pose
 
-        break
+      #NOTE: remove this break once you want to do video-like demo
+      #for now we only run FoundationPose on only one frame of one object
+      break
 
     # Return the result dictionary, which contains the pose estimates for each frame and object
     return result
@@ -296,6 +297,8 @@ def run_pose_estimation():
     # Reset the pose estimator (`FoundationPose`) to the new object's mesh and parameters.
     est.reset_object(model_pts=mesh.vertices.copy(), model_normals=mesh.vertex_normals.copy(), symmetry_tfs=symmetry_tfs, mesh=mesh)
 
+    
+
     # Loop through each frame (each image in the dataset) for this object.
     frame_batch = list(range(len(reader.color_files)))
     # Store the results of the pose estimation.
@@ -303,16 +306,17 @@ def run_pose_estimation():
     outs.append(out)
 
   
-  #organizing the pose estimation results in a nested disctionary structure
-  for out in outs:
-      for video_id in out:
-          for id_str in out[video_id]:
-              for ob_id in out[video_id][id_str]:
-                  res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
+
+  # #organizing the pose estimation results in a nested disctionary structure
+  # for out in outs:
+  #     for video_id in out:
+  #         for id_str in out[video_id]:
+  #             for ob_id in out[video_id][id_str]:
+  #                 res[video_id][id_str][ob_id] = out[video_id][id_str][ob_id]
   
-  # Save the results to a YAML file in the debug directory.
-  with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
-      yaml.safe_dump(make_yaml_dumpable(res), ff)
+  # # Save the results to a YAML file in the debug directory.
+  # with open(f'{opt.debug_dir}/linemod_res.yml','w') as ff:
+  #     yaml.safe_dump(make_yaml_dumpable(res), ff)
 
 
 
